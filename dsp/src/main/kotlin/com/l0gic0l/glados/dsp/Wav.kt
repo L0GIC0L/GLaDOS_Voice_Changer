@@ -29,7 +29,8 @@ object Wav {
             val id = tag(b, pos)
             var len = b.getInt(pos + 4)
             val body = pos + 8
-            if (len < 0 || body + len > bytes.size) len = bytes.size - body
+            // Streaming writers (some Android TTS engines) leave the length at 0 or -1.
+            if (len < 0 || body + len > bytes.size || (id == "data" && len == 0)) len = bytes.size - body
             when (id) {
                 "fmt " -> {
                     format = b.getShort(body).toInt() and 0xFFFF

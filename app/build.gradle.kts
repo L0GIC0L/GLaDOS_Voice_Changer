@@ -34,6 +34,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 kotlin {
@@ -52,8 +59,27 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+}
+
+tasks.withType<Test>().configureEach {
+    // Optional: screenshot and real-speech inputs for the UI smoke tests. Skipped when unset.
+    for (name in listOf("GLADOS_SHOT_DIR", "GLADOS_TEST_WAV")) {
+        System.getenv(name)?.let { environment(name, it) }
+    }
+    maxHeapSize = "2g"
+    if (System.getenv("GLADOS_SHOT_DIR") != null) systemProperty("roborazzi.test.record", "true")
 }

@@ -39,11 +39,13 @@ class Analysis(
         }
     }
 
-    /** Median pitch of voiced frames (MIDI), or NaN for a clip with no voiced sound. */
-    fun medianMidi(): Double {
+    private val median: Double by lazy {
         val v = (0 until frames).filter { voiced[it] }.map { midi(it) }.sorted()
-        return if (v.isEmpty()) Double.NaN else v[v.size / 2]
+        if (v.isEmpty()) Double.NaN else v[v.size / 2]
     }
+
+    /** Median pitch of voiced frames (MIDI), or NaN for a clip with no voiced sound. */
+    fun medianMidi(): Double = median
 }
 
 object Analyzer {

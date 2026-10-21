@@ -92,4 +92,14 @@ class ModelTest {
         assertEquals(x.size, back.samples.size)
         for (i in x.indices) assertEquals(x[i].toDouble(), back.samples[i].toDouble(), 1e-3)
     }
+
+    @Test
+    fun wavWithZeroDataLengthStillReads() {
+        val x = FloatArray(500) { 0.25f }
+        val bytes = Wav.encode(Audio(x, 22050))
+        // Zero the RIFF and data sizes as a streaming writer would.
+        for (i in 4..7) bytes[i] = 0
+        for (i in 40..43) bytes[i] = 0
+        assertEquals(500, Wav.read(bytes).samples.size)
+    }
 }
