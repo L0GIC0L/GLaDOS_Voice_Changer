@@ -3,7 +3,9 @@ package com.l0gic0l.glados.audio
 import android.content.Context
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -26,6 +28,8 @@ data class LiveState(
     val error: String? = null,
     val latencyMs: Int = 0,
     val sampleRate: Int = 0,
+    /** Something the user should know about while live, such as output having been muted. */
+    val notice: String? = null,
 )
 
 /**
@@ -41,11 +45,20 @@ class LiveController(
 
     val trace = PitchTrace()
 
-    @Volatile
-    var bypass = false
+    private val _bypass = MutableStateFlow(false)
+    private val _muted = MutableStateFlow(false)
 
-    @Volatile
-    var muted = false
+    /** Observable by the UI; also read directly by the audio thread. */
+    val bypassState: StateFlow<Boolean> = _bypass.asStateFlow()
+    val mutedState: StateFlow<Boolean> = _muted.asStateFlow()
+
+    var bypass: Boolean
+        get() = _bypass.value
+        set(v) { _bypass.value = v }
+
+    var muted: Boolean
+        get() = _muted.value
+        set(v) { _muted.value = v }
 
     @Volatile
     var inputDeviceId = 0
@@ -78,6 +91,20 @@ class LiveController(
     @Volatile private var thread: Thread? = null
     @Volatile private var stopRequested = false
 
+    /**
+     * Headphones unplugged or a Bluetooth speaker dropped: Android would move the output to the loudspeaker, where
+     * the processed voice would be picked straight back up by the microphone. Mute instead and say so.
+     */
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, intent: Intent) {
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                muted = true
+                _state.value = _state.value.copy(notice = "Output device disconnected. Muted to avoid feedback.")
+            }
+        }
+    }
+    private var receiverRegistered = false
+
     /** Starts the foreground service, which calls [begin]. Caller must hold RECORD_AUDIO. */
     fun start() {
         if (_state.value.running) return
@@ -99,6 +126,12 @@ class LiveController(
         if (thread != null) return
         stopRequested = false
         _state.value = LiveState(running = true)
+        if (!receiverRegistered) {
+            ContextCompat.registerReceiver(
+                context, noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            receiverRegistered = true
+        }
         val t = Thread({ loop() }, "glados-live")
         thread = t
         t.start()
@@ -107,6 +140,14 @@ class LiveController(
     /** Called by the service when it is destroyed. */
     internal fun halt() {
         stopRequested = true
+        unregisterReceiver()
+    }
+
+    private fun unregisterReceiver() {
+        if (receiverRegistered) {
+            receiverRegistered = false
+            runCatching { context.unregisterReceiver(noisyReceiver) }
+        }
     }
 
     private fun fail(message: String) {
@@ -207,7 +248,11 @@ class LiveController(
                 for (i in 0 until n) peakOut = max(peakOut, abs(out[i]))
                 inputLevel = peakIn
                 outputLevel = peakOut
-                track.write(out, 0, n, AudioTrack.WRITE_BLOCKING)
+                val written = track.write(out, 0, n, AudioTrack.WRITE_BLOCKING)
+                if (written < 0) {
+                    fail("Audio output stopped (error $written). Tap Go live to restart.")
+                    break
+                }
 
                 // Sustained loud-but-unpitched input means detection is failing, not that the speaker paused.
                 val pitched = engine.inputHz > 0
@@ -229,6 +274,7 @@ class LiveController(
             outputLevel = 0f
             voiceDetected = false
             noVoiceWarning = false
+            unregisterReceiver()
             trace.clear()
             thread = null
             if (_state.value.error == null) _state.value = LiveState()

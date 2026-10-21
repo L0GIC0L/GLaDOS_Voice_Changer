@@ -34,6 +34,8 @@ class TtsEngine(private val context: Context) {
     val error: StateFlow<String?> = _error.asStateFlow()
 
     private var tts: TextToSpeech? = null
+    private var defaultVoice: Voice? = null
+    private var voiceByName: Map<String, Voice> = emptyMap()
     private val pending = ConcurrentHashMap<String, Pair<CancellableContinuation<Audio>, File>>()
     private var counter = 0
 
@@ -44,10 +46,22 @@ class TtsEngine(private val context: Context) {
             val engine = tts
             if (status != TextToSpeech.SUCCESS || engine == null) {
                 _error.value = "No text-to-speech engine is available. Install or enable one in Android settings."
+                // Forget the failed instance so a later retry() can start over.
+                engine?.shutdown()
+                tts = null
                 return@TextToSpeech
             }
+            _error.value = null
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
+
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    val id = utteranceId ?: return
+                    pending.remove(id)?.let { (cont, file) ->
+                        file.delete()
+                        if (cont.isActive) cont.resumeWithException(IllegalStateException("The speech was interrupted."))
+                    }
+                }
 
                 override fun onDone(utteranceId: String?) {
                     val id = utteranceId ?: return
@@ -70,11 +84,13 @@ class TtsEngine(private val context: Context) {
                     }
                 }
             })
-            val list = runCatching { engine.voices.orEmpty() }.getOrDefault(emptySet<Voice>())
+            val installed = runCatching { engine.voices.orEmpty() }.getOrDefault(emptySet<Voice>())
                 .filter { !it.features.contains("notInstalled") }
                 .sortedWith(compareBy({ it.locale.displayName }, { it.name }))
-                .map { TtsVoice(it.name, "${it.locale.displayName} - ${it.name}") }
-            _voices.value = list
+            // Looking voices up is a call into the speech service; do it once here rather than on every request.
+            voiceByName = installed.associateBy { it.name }
+            defaultVoice = runCatching { engine.defaultVoice }.getOrNull()
+            _voices.value = installed.map { TtsVoice(it.name, "${it.locale.displayName} - ${it.name}") }
             _ready.value = true
         }
     }
@@ -86,7 +102,8 @@ class TtsEngine(private val context: Context) {
      */
     suspend fun synthesize(text: String, voiceName: String?, rate: Float, pitch: Float): Audio {
         val engine = tts ?: throw IllegalStateException("Speech engine not ready.")
-        voiceName?.let { n -> engine.voices?.firstOrNull { it.name == n }?.let { engine.voice = it } }
+        // Always set a voice: choosing "Engine default" after a specific voice must go back to the default.
+        (voiceName?.let { voiceByName[it] } ?: defaultVoice)?.let { engine.voice = it }
         engine.setSpeechRate(rate)
         engine.setPitch(pitch)
         val id = "u${counter++}"
@@ -103,6 +120,14 @@ class TtsEngine(private val context: Context) {
                 pending.remove(id)
                 if (cont.isActive) cont.resumeWithException(IllegalStateException("The speech engine rejected that text."))
             }
+        }
+    }
+
+    /** Starts over after a failed [init]. */
+    fun retry() {
+        if (tts == null) {
+            _error.value = null
+            init()
         }
     }
 

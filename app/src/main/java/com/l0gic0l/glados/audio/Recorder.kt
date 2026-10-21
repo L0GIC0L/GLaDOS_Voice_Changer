@@ -26,6 +26,10 @@ class Recorder(private val context: Context) {
 
     @Volatile
     private var result: Audio? = null
+
+    /** Called, from the recording thread, when recording ends by itself rather than through [stop]. */
+    @Volatile
+    var onAutoStop: ((String) -> Unit)? = null
     private var chunks = ArrayList<FloatArray>()
 
     @SuppressLint("MissingPermission") // checked immediately below
@@ -41,11 +45,19 @@ class Recorder(private val context: Context) {
         val t = Thread {
             val buf = FloatArray(4096)
             var total = 0
+            var reason: String? = null
             try {
                 rec.startRecording()
-                while (recording && total < maxSeconds * sampleRate) {
+                while (recording) {
+                    if (total >= maxSeconds * sampleRate) {
+                        reason = "Recording stopped at the ${maxSeconds / 60} minute limit."
+                        break
+                    }
                     val n = rec.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING)
-                    if (n <= 0) break
+                    if (n <= 0) {
+                        reason = "Recording stopped because the microphone became unavailable."
+                        break
+                    }
                     chunks += buf.copyOf(n)
                     total += n
                     var peak = 0f
@@ -63,6 +75,9 @@ class Recorder(private val context: Context) {
                 }
                 result = Audio(all, sampleRate)
                 level = 0f
+                // If the loop ended on its own, `recording` is still true here: tell the owner.
+                val stoppedItself = recording
+                if (stoppedItself) onAutoStop?.invoke(reason ?: "Recording stopped.")
                 recording = false
             }
         }

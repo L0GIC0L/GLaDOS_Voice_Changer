@@ -48,7 +48,9 @@ class LiveService : Service() {
 
     private fun notification(): Notification {
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE,
         )
         val stop = PendingIntent.getService(
             this, 1, Intent(this, LiveService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,

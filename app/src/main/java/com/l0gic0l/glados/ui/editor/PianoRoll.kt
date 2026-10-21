@@ -315,7 +315,7 @@ fun PianoRoll(vm: MainViewModel, controls: RollControls, modifier: Modifier = Mo
 
         clipRect(left = gutter, top = ruler, right = w, bottom = h) {
             val boxes = layout(edit, an, tm, geo, sr)
-            val loud = an.level.sorted().let { it[(it.size * 0.95).toInt().coerceAtMost(it.size - 1)] }.coerceAtLeast(1e-4f)
+            val loud = an.loudLevel
             val selection = vm.selection
             val pxPerFrame = v.pxPerSec * an.hop / sr
             val step = max(1, ceil(2.5f * dp1 / max(pxPerFrame, 0.01f)).toInt())

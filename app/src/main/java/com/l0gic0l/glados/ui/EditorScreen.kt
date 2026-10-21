@@ -90,9 +90,12 @@ fun EditorScreen(vm: MainViewModel, goSpeak: () -> Unit) {
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = ::record,
+                enabled = vm.recording || vm.busy == null,
                 colors = if (vm.recording) IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error) else IconButtonDefaults.iconButtonColors(),
             ) { Icon(if (vm.recording) Icons.Filled.Stop else Icons.Filled.Mic, contentDescription = if (vm.recording) "Stop recording" else "Record") }
-            IconButton(onClick = { open.launch(arrayOf("audio/*")) }) { Icon(Icons.Filled.FileOpen, contentDescription = "Import audio") }
+            IconButton(onClick = { open.launch(arrayOf("audio/*")) }, enabled = vm.busy == null && !vm.recording) {
+                Icon(Icons.Filled.FileOpen, contentDescription = "Import audio")
+            }
             IconButton(onClick = vm::togglePlay, enabled = clip != null) {
                 Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play")
             }

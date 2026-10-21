@@ -26,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,9 +54,10 @@ fun LiveScreen(vm: MainViewModel) {
     val state by vm.live.state.collectAsStateWithLifecycle()
     val params by vm.params.collectAsStateWithLifecycle()
     var denied by remember { mutableStateOf(false) }
-    var bypass by remember { mutableStateOf(vm.live.bypass) }
-    var muted by remember { mutableStateOf(vm.live.muted) }
     val tick by rememberFrameTick(state.running)
+    // The controller can change these on its own, for example muting when headphones are unplugged.
+    val bypass by vm.live.bypassState.collectAsStateWithLifecycle()
+    val muted by vm.live.mutedState.collectAsStateWithLifecycle()
 
     val permissions = buildList {
         add(Manifest.permission.RECORD_AUDIO)
@@ -82,8 +84,11 @@ fun LiveScreen(vm: MainViewModel) {
 
     val inputs = remember(state.running) { AudioDevices.inputs(context) }
     val outputs = remember(state.running) { AudioDevices.outputs(context) }
-    var inIndex by remember { mutableStateOf(0) }
-    var outIndex by remember { mutableStateOf(0) }
+    // The chosen devices live in the controller, so the pickers keep their selection across tab changes and rotation.
+    var inId by remember { mutableIntStateOf(vm.live.inputDeviceId) }
+    var outId by remember { mutableIntStateOf(vm.live.outputDeviceId) }
+    val inIndex = inputs.indexOfFirst { it.id == inId }.coerceAtLeast(0)
+    val outIndex = outputs.indexOfFirst { it.id == outId }.coerceAtLeast(0)
 
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
@@ -101,6 +106,7 @@ fun LiveScreen(vm: MainViewModel) {
                 color = MaterialTheme.colorScheme.error,
             )
             state.error != null -> Text(state.error!!, color = MaterialTheme.colorScheme.error)
+            state.running && state.notice != null -> Text(state.notice!!, color = MaterialTheme.colorScheme.error)
             state.running -> Text(
                 "Live at ${state.sampleRate / 1000.0} kHz, about ${state.latencyMs} ms delay. Use headphones to avoid feedback.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -149,15 +155,15 @@ fun LiveScreen(vm: MainViewModel) {
 
         ElevatedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SwitchLine("Hear original voice (bypass)", bypass) { bypass = it; vm.live.bypass = it }
-                SwitchLine("Mute output", muted) { muted = it; vm.live.muted = it }
+                SwitchLine("Hear original voice (bypass)", bypass) { vm.live.bypass = it }
+                SwitchLine("Mute output", muted) { vm.live.muted = it }
                 SelectField(
                     "Microphone", inputs.getOrNull(inIndex)?.label ?: "Default", inputs.map { it.label },
-                    { inIndex = it; vm.live.inputDeviceId = inputs[it].id },
+                    { inId = inputs[it].id; vm.live.inputDeviceId = inputs[it].id },
                 )
                 SelectField(
                     "Output", outputs.getOrNull(outIndex)?.label ?: "Default", outputs.map { it.label },
-                    { outIndex = it; vm.live.outputDeviceId = outputs[it].id },
+                    { outId = outputs[it].id; vm.live.outputDeviceId = outputs[it].id },
                 )
             }
         }

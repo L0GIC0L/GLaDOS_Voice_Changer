@@ -264,4 +264,38 @@ class LivePitchEngineTest {
         println("peak in=$peakIn out=$peakOut")
         assertTrue("output peak $peakOut vs input $peakIn", peakOut < peakIn * 1.6f)
     }
+
+    @Test
+    fun survivesMoreThan2ToThe31SamplesOfStreaming() {
+        // Simulate about 13 hours of continuous use without processing that many samples.
+        val x = TestSignals.voice(sr, 3.0, { 176.0 })
+        val e = LivePitchEngine(sr, base())
+        val bi = FloatArray(128)
+        val bo = FloatArray(128)
+        val out = FloatArray(x.size)
+        var i = 0
+        while (i + 128 <= x.size) {
+            if (i == sr) e.shiftClock((1L shl 31) + (1L shl 20)) // multiple of the ring size
+            System.arraycopy(x, i, bi, 0, 128)
+            e.process(bi, bo, 128)
+            System.arraycopy(bo, 0, out, i, 128)
+            i += 128
+        }
+        assertSane(out)
+        assertEquals(0, e.starvedGrains)
+        val med = TestSignals.median(TestSignals.pitchTrack(out, sr, 2 * sr, out.size))
+        assertEquals(0.0, TestSignals.cents(med, Pitch.midiToHz(round(Pitch.hzToMidi(176.0)))), 15.0)
+    }
+
+    @Test
+    fun aSingleNaNOrInfSampleDoesNotSilenceTheEngine() {
+        val x = TestSignals.voice(sr, 3.0, { 176.0 })
+        x[sr + 100] = Float.NaN
+        x[sr + 5000] = Float.POSITIVE_INFINITY
+        val (y, e) = run(x, base())
+        assertSane(y)
+        assertEquals(0, e.starvedGrains)
+        val med = TestSignals.median(TestSignals.pitchTrack(y, sr, 2 * sr, y.size))
+        assertEquals(0.0, TestSignals.cents(med, Pitch.midiToHz(round(Pitch.hzToMidi(176.0)))), 15.0)
+    }
 }

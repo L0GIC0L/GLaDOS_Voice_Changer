@@ -69,7 +69,10 @@ fun TtsScreen(vm: MainViewModel, openEditor: () -> Unit) {
             minLines = 4,
             modifier = Modifier.fillMaxWidth(),
         )
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { vm.tts.retry() }) { Text("Try again") }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(

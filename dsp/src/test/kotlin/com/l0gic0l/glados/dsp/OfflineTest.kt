@@ -230,4 +230,49 @@ class OfflineTest {
         val med = an.medianMidi()
         assertEquals(Pitch.hzToMidi(220.0), med + shift, 0.01)
     }
+
+    @Test
+    fun oddHopKeepsTouchingNotesOnOneSharedAnchor() {
+        // 44.1 kHz gives a 221-sample hop. Touching notes must share a single boundary anchor, or the Timing tool
+        // cannot move them and splitting leaves a gap or an overlap.
+        val sr44 = 44100
+        // Legato steps, no gaps, so the notes touch each other.
+        val x = TestSignals.voice(sr44, 2.1, { if (it < 0.7) 120.0 else if (it < 1.4) 150.0 else 190.0 }, seed = 4)
+        val an = Analyzer.analyze(x, sr44, params)
+        assertTrue("expected an odd hop, got ${an.hop}", an.hop % 2 == 1)
+        val edit = NoteOps.segment(an)
+        assertTrue("need several notes, got ${edit.notes.size}", edit.notes.size >= 3)
+        assertTrue("need touching notes", edit.notes.zipWithNext().any { (a, b) -> b.f0 == a.f1 + 1 })
+        for ((a, b) in edit.notes.zipWithNext()) {
+            if (b.f0 == a.f1 + 1) assertEquals("touching notes must meet exactly", a.inEnd(an), b.inStart(an))
+        }
+        val n = edit.notes.first { it.frames >= 12 }
+        val i = edit.notes.indexOf(n)
+        val mid = (n.f0 + n.f1) / 2
+        assertTrue(NoteOps.split(edit, an, i, mid))
+        val left = edit.notes[i]
+        val right = edit.notes[i + 1]
+        assertEquals(left.inEnd(an), right.inStart(an))
+        assertTrue("the split boundary must be a real anchor", edit.anchors.containsKey(right.inStart(an)))
+        // The shared anchor moves both neighbours.
+        val moved = edit.moveAnchors(listOf(right.inStart(an)), 20.0, 0.005 * sr44, an.length)
+        assertTrue("the boundary would not move ($moved)", moved != 0.0)
+    }
+
+    @Test
+    fun splitAndMergeKeepTheEditedPitch() {
+        val (x, _) = phrase()
+        val an = analyse(x)
+        val edit = NoteOps.segment(an)
+        val i = 0
+        val n = edit.notes[i]
+        NoteOps.correct(listOf(n), Scales.CHROMATIC_MASK, 1.0, 1.0, 1.0, 0.0)
+        val target = n.center + n.offset
+        assertTrue(NoteOps.split(edit, an, i, (n.f0 + n.f1) / 2))
+        for (half in listOf(edit.notes[i], edit.notes[i + 1])) {
+            assertEquals("a split half drifted off the corrected pitch", target, half.center + half.offset, 1e-9)
+        }
+        assertTrue(NoteOps.merge(edit, an, i))
+        assertEquals("a merged note drifted off the corrected pitch", target, edit.notes[i].center + edit.notes[i].offset, 1e-9)
+    }
 }

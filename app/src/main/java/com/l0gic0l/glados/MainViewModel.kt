@@ -23,12 +23,17 @@ import com.l0gic0l.glados.dsp.Wav
 import com.l0gic0l.glados.model.Presets
 import com.l0gic0l.glados.model.Specs
 import com.l0gic0l.glados.model.VoiceParams
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,6 +94,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var lastMutation = 0L
     private var renderJob: Job? = null
     private var reanalyseJob: Job? = null
+    private var loadJob: Job? = null
     private var dry: FloatArray? = null
 
     init {
@@ -134,7 +140,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         userPresets.value[name]?.let { container.setParams(VoiceParams.fromMap(it)) }
     }
 
-    fun saveUserPreset(name: String) = container.saveUserPreset(name.trim())
+    fun saveUserPreset(name: String) {
+        val clean = name.trim()
+        when {
+            clean.isEmpty() -> return
+            Presets.all.any { it.name.equals(clean, ignoreCase = true) } -> message = "\"$clean\" is a built-in preset name. Choose another."
+            else -> container.saveUserPreset(clean)
+        }
+    }
     fun deleteUserPreset(name: String) = container.deleteUserPreset(name)
     fun setTheme(t: com.l0gic0l.glados.data.ThemeSettings) = container.setTheme(t)
 
@@ -232,14 +245,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         for (k in e.anchors.keys.toList()) e.anchors[k] = k.toDouble()
     }
 
+    /**
+     * Runs [block] on a throwaway copy first; only if it succeeds is the real edit changed and an undo step recorded.
+     * A refused operation therefore leaves the undo and redo history untouched.
+     */
+    private fun tryMutate(failureMessage: String, block: (Edit, Analysis) -> Boolean): Boolean {
+        val e = edit ?: return false
+        val a = clip?.analysis ?: return false
+        if (!block(e.copy(), a)) {
+            message = failureMessage
+            return false
+        }
+        pushUndo()
+        lastCoalesce = null
+        block(e, a)
+        bump()
+        return true
+    }
+
     fun splitNote(index: Int, frame: Int) {
-        var done = false
-        mutate { e, a -> done = NoteOps.split(e, a, index, frame) }
-        if (!done) {
-            undoStack.removeLastOrNull()
-            canUndo = undoStack.isNotEmpty()
-            message = "That cut is too close to the edge of the note."
-        } else {
+        if (tryMutate("That cut is too close to the edge of the note.") { e, a -> NoteOps.split(e, a, index, frame) }) {
             selection = setOf(index, index + 1)
         }
     }
@@ -249,11 +274,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (idx.isEmpty()) return
         val first = idx.first()
         val last = if (idx.size == 1) first + 1 else idx.last()
-        var merged = false
-        mutate { e, a ->
+        val ok = tryMutate("Those notes are not next to each other.") { e, a ->
+            var merged = false
             for (i in last - 1 downTo first) merged = NoteOps.merge(e, a, i) || merged
+            merged
         }
-        if (merged) selection = setOf(first) else message = "Those notes are not next to each other."
+        if (ok) selection = setOf(first)
     }
 
     /** Re-runs pitch analysis on the current audio, for when the voice range or sensitivity settings changed. Edits are lost. */
@@ -265,7 +291,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun resegment() {
         val cs = clip ?: return
         val e = NoteOps.segment(cs.analysis, segTolerance.toDouble(), segSensitivity / 100.0)
-        val p = params.value
         pushUndo()
         edit = e
         selection = emptySet()
@@ -275,23 +300,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- clip lifecycle ----
 
     /**
-     * Analyses [audio], splits it into notes and makes it the editor clip.
+     * Analyses [audio], splits it into notes and makes it the editor clip. A newer call cancels an older one that is
+     * still running, so two overlapping loads can never interleave their results.
      * @param autoCorrect apply the live Tuning settings to every note, so speech matches the live voice
      */
     fun loadAudio(audio: Audio, title: String, autoCorrect: Boolean, autoplay: Boolean) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        renderJob?.cancel()
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             player.stop()
             busy = "Analysing..."
             val p = params.value
             try {
                 val an = withContext(Dispatchers.Default) {
-                    Analyzer.analyze(audio.samples, audio.sampleRate, p, progress = { busy = "Analysing ${(it * 100).toInt()}%" })
+                    Analyzer.analyze(
+                        audio.samples, audio.sampleRate, p,
+                        progress = { busy = "Analysing ${(it * 100).toInt()}%" },
+                        cancelled = { !isActive },
+                    )
                 }
                 val e = withContext(Dispatchers.Default) {
                     NoteOps.segment(an, segTolerance.toDouble(), segSensitivity / 100.0).also {
                         if (autoCorrect) NoteOps.correctLikeLive(it.notes, p, NoteOps.globalShift(an, p))
                     }
                 }
+                val out = withContext(Dispatchers.Default) { renderClip(audio, an, e, params.value) { !isActive } }
+                ensureActive()
                 if (e.notes.isEmpty()) message = "No pitched voice found. It will play back unchanged."
                 clip = ClipState(audio, an, title, autoCorrect)
                 analysisStale = false
@@ -302,16 +336,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 canUndo = false
                 canRedo = false
                 editVersion++
-                val out = withContext(Dispatchers.Default) { renderClip(audio, an, e, params.value) { false } }
                 dry = out
                 player.setClip(out, audio.sampleRate)
                 if (autoplay) player.play(fromStart = true)
+            } catch (ex: CancellationException) {
+                throw ex
             } catch (ex: Exception) {
                 message = "Could not analyse that audio: ${ex.message}"
             } finally {
-                busy = null
+                // A newer load owns the busy indicator once it has started.
+                if (loadJob === coroutineContext[Job]) busy = null
             }
         }
+        loadJob = job
+        job.start()
     }
 
     private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, cancelled: () -> Boolean): FloatArray {
@@ -328,7 +366,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         renderJob = viewModelScope.launch(Dispatchers.Default) {
             delay(delayMs)
             val out = renderClip(cs.audio, cs.analysis, ed, p) { !isActive }
-            if (isActive) {
+            // Only publish if this render is still for the clip on screen.
+            if (isActive && clip === cs) {
                 dry = out
                 player.setClip(out, cs.audio.sampleRate)
             }
@@ -341,21 +380,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleRecord() {
         if (!recording) {
+            if (busy != null) return
             player.stop()
+            recorder.onAutoStop = { reason ->
+                // The recorder stopped by itself (length cap or a read error); finish up exactly as if the user had.
+                viewModelScope.launch { finishRecording(reason) }
+            }
             if (recorder.start()) recording = true else message = "Could not start the microphone."
         } else {
-            recording = false
-            val audio = recorder.stop()
-            if (audio == null) message = "Nothing was recorded." else loadAudio(audio, "Recording", autoCorrect = true, autoplay = true)
+            finishRecording(null)
+        }
+    }
+
+    private fun finishRecording(note: String?) {
+        if (!recording) return
+        recording = false
+        val audio = recorder.stop()
+        when {
+            audio == null -> message = note ?: "Nothing was recorded."
+            else -> {
+                if (note != null) message = note
+                loadAudio(audio, "Recording", autoCorrect = true, autoplay = true)
+            }
         }
     }
 
     fun importFile(uri: Uri) {
+        if (busy != null) return
         viewModelScope.launch {
             busy = "Decoding..."
             try {
-                val audio = withContext(Dispatchers.IO) { AudioDecoder.decode(getApplication(), uri) }
-                loadAudio(audio, "Imported audio", autoCorrect = true, autoplay = true)
+                val decoded = withContext(Dispatchers.IO) { AudioDecoder.decode(getApplication(), uri) }
+                if (decoded.truncated) message = "Only the first ${AudioDecoder.MAX_SECONDS / 60} minutes were imported."
+                loadAudio(decoded.audio, "Imported audio", autoCorrect = true, autoplay = true)
+            } catch (ex: CancellationException) {
+                throw ex
             } catch (ex: Exception) {
                 busy = null
                 message = "Could not read that file: ${ex.message}"
@@ -397,17 +456,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- text to speech ----
 
     fun speak(text: String, voice: String?, rate: Float, pitch: Float, autoTune: Boolean) {
-        if (text.isBlank()) return
+        if (text.isBlank() || busy != null) return
         viewModelScope.launch {
             busy = "Speaking..."
             try {
-                val raw = tts.synthesize(text, voice, rate, pitch)
+                val raw = withTimeout(90_000) { tts.synthesize(text, voice, rate, pitch) }
                 val peak = raw.samples.fold(0f) { m, v -> max(m, abs(v)) }
                 if (peak > 1e-4f) {
                     val g = 0.8f / peak
                     for (i in raw.samples.indices) raw.samples[i] *= g
                 }
                 loadAudio(raw, "Speech", autoCorrect = autoTune, autoplay = true)
+            } catch (ex: TimeoutCancellationException) {
+                busy = null
+                message = "The speech engine did not answer in time. Try again, or pick another voice."
+            } catch (ex: CancellationException) {
+                throw ex
             } catch (ex: Exception) {
                 busy = null
                 message = ex.message ?: "Speech failed."

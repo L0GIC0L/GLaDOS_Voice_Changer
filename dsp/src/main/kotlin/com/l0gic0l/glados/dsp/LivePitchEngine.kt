@@ -32,6 +32,10 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
         private const val FRAMES = 256
         private const val MARKS = 512
         private const val NONE = Long.MIN_VALUE / 4
+
+        /** Absolute positions are rebased well before they could overflow an Int index (2^31 samples is about 12 h at 48 kHz). */
+        private const val REBASE_AT = 1L shl 30
+        private const val REBASE_BY = 1L shl 29
     }
 
     // ---- configuration ----
@@ -159,6 +163,9 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
         anaBuf.fill(0f)
         band.reset()
         wasPeriodic = false
+        dcX = 0f
+        dcY = 0f
+        gateEnv = 0f
         acc.fill(0f)
         norm.fill(0f)
         wIn = 0
@@ -180,10 +187,26 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
 
     /** Processes [n] samples. [input] and [output] may be the same array. */
     fun process(input: FloatArray, output: FloatArray, n: Int) {
+        if (wIn > REBASE_AT) shiftClock(-REBASE_BY)
         ingest(input, n)
         advanceMarks()
         synthesize(n)
         emit(output, n)
+    }
+
+    /**
+     * Moves every absolute position by [delta] samples. [delta] must be a multiple of the ring sizes so that
+     * buffer indices are unchanged. Used to rebase before positions grow past what an Int index can hold, and by
+     * tests to simulate many hours of streaming.
+     */
+    internal fun shiftClock(delta: Long) {
+        require(delta % RING == 0L) { "delta must keep ring indices aligned" }
+        wIn += delta
+        wOut += delta
+        sNext += delta.toDouble()
+        if (lastMarkPos != NONE) lastMarkPos += delta
+        for (i in mPos.indices) mPos[i] += delta
+        for (i in fTime.indices) fTime[i] += delta
     }
 
     // ------------------------------------------------------------------ input
@@ -194,7 +217,9 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
         val release = (1.0 - exp(-1.0 / (0.050 * sampleRate))).toFloat()
         val holdSamples = (0.120 * sampleRate).toInt()
         for (i in 0 until n) {
-            val raw = input[i]
+            var raw = input[i]
+            // A NaN or Inf from a misbehaving driver would otherwise poison the filters for good.
+            if (!(raw > -8f && raw < 8f)) raw = 0f
             // DC blocker
             val x = raw - dcX + 0.998f * dcY
             dcX = raw

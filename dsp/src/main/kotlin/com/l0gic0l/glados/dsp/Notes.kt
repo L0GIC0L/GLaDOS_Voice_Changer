@@ -79,9 +79,13 @@ class Note(var f0: Int, var f1: Int) {
         it.center = center; it.slow = slow; it.fast = fast
     }
 
-    /** Input span in samples. */
+    /**
+     * Input span in samples. A frame covers [i * hop - hop/2, (i + 1) * hop - hop/2). The end is written as the
+     * start of the *next* frame so that touching notes share exactly one boundary for any hop, including the odd
+     * hop that a 44.1 kHz clip gets.
+     */
     fun inStart(an: Analysis): Int = max(0, f0 * an.hop - an.hop / 2)
-    fun inEnd(an: Analysis): Int = min(an.length, f1 * an.hop + an.hop / 2)
+    fun inEnd(an: Analysis): Int = min(an.length, (f1 + 1) * an.hop - an.hop / 2)
 }
 
 /** Piecewise-linear mapping between input and output time, defined by anchor points. */
@@ -258,12 +262,15 @@ object NoteOps {
     fun split(edit: Edit, an: Analysis, index: Int, frame: Int): Boolean {
         val n = edit.notes[index]
         if (frame - n.f0 < 3 || n.f1 - frame < 2) return false
+        val target = n.center + n.offset
         val right = n.copy()
         right.f0 = frame
         n.f1 = frame - 1
         n.refresh(an)
         right.refresh(an)
-        // refresh recomputes the centre; keep the edited pitch relative to it.
+        // refresh recomputes each half's centre; keep both halves on the pitch the note was edited to.
+        n.offset = target - n.center
+        right.offset = target - right.center
         edit.notes.add(index + 1, right)
         val key = right.inStart(an)
         if (!edit.anchors.containsKey(key)) {
@@ -280,8 +287,10 @@ object NoteOps {
         if (b.f0 - a.f1 > 3) return false
         val touching = a.inEnd(an) == b.inStart(an)
         val boundary = b.inStart(an)
+        val target = a.center + a.offset
         a.f1 = b.f1
         a.refresh(an)
+        a.offset = target - a.center // the joined note keeps the first note's edited pitch
         edit.notes.removeAt(index + 1)
         // Notes that shared a boundary move as one once joined, so that anchor goes away.
         if (touching) edit.anchors.remove(boundary)

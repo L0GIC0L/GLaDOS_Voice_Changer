@@ -108,4 +108,17 @@ class ModelTest {
         for (i in 40..43) bytes[i] = 0
         assertEquals(500, Wav.read(bytes).samples.size)
     }
+
+    @Test
+    fun malformedWavHeadersAreRejectedCleanly() {
+        val good = Wav.encode(Audio(FloatArray(100) { 0.1f }, 22050))
+        // Zero channels, which would divide by zero.
+        val noChannels = good.copyOf().also { it[22] = 0; it[23] = 0 }
+        try { Wav.read(noChannels); org.junit.Assert.fail("zero channels accepted") } catch (e: IllegalArgumentException) { /* expected */ }
+        // A chunk length near 2^32 must not overflow the bounds check.
+        val huge = good.copyOf().also { for (i in 40..43) it[i] = 0xFF.toByte() }
+        assertEquals(100, Wav.read(huge).samples.size)
+        // Truncated file.
+        try { Wav.read(good.copyOf(20)); org.junit.Assert.fail("truncated file accepted") } catch (e: IllegalArgumentException) { /* expected */ }
+    }
 }

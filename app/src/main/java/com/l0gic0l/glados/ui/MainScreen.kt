@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,7 @@ fun MainScreen(vm: MainViewModel) {
     var dest by rememberSaveable { mutableStateOf(Dest.LIVE) }
     var showTheme by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val holder = rememberSaveableStateHolder()
     val theme by vm.theme.collectAsStateWithLifecycle()
 
     LaunchedEffect(vm.message) {
@@ -95,11 +97,14 @@ fun MainScreen(vm: MainViewModel) {
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            when (dest) {
-                Dest.LIVE -> LiveScreen(vm)
-                Dest.SPEAK -> TtsScreen(vm, openEditor = { dest = Dest.EDITOR })
-                Dest.EDITOR -> EditorScreen(vm, goSpeak = { dest = Dest.SPEAK })
-                Dest.VOICE -> VoiceScreen(vm)
+            // Keeps each tab's remembered state (typed text, scroll position, expanded sections) while another tab is shown.
+            holder.SaveableStateProvider(dest.name) {
+                when (dest) {
+                    Dest.LIVE -> LiveScreen(vm)
+                    Dest.SPEAK -> TtsScreen(vm, openEditor = { dest = Dest.EDITOR })
+                    Dest.EDITOR -> EditorScreen(vm, goSpeak = { dest = Dest.SPEAK })
+                    Dest.VOICE -> VoiceScreen(vm)
+                }
             }
             vm.busy?.let { label ->
                 Surface(

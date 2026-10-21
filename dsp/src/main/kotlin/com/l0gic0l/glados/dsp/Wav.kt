@@ -15,7 +15,15 @@ class Audio(val samples: FloatArray, val sampleRate: Int) {
 
 /** Minimal RIFF/WAVE reader and writer: PCM 8/16/24/32-bit and float32 in, 16-bit mono out. */
 object Wav {
-    fun read(bytes: ByteArray): Audio {
+    /** @throws IllegalArgumentException if the data is not a readable WAV file (including truncated or corrupt ones) */
+    fun read(bytes: ByteArray): Audio =
+        try {
+            parse(bytes)
+        } catch (e: IndexOutOfBoundsException) {
+            throw IllegalArgumentException("Truncated or corrupt WAV file", e)
+        }
+
+    private fun parse(bytes: ByteArray): Audio {
         val b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         require(bytes.size >= 12 && tag(b, 0) == "RIFF" && tag(b, 8) == "WAVE") { "Not a WAV file" }
         var pos = 12
@@ -27,10 +35,12 @@ object Wav {
         var dataLen = 0
         while (pos + 8 <= bytes.size) {
             val id = tag(b, pos)
-            var len = b.getInt(pos + 4)
+            val declared = b.getInt(pos + 4).toLong() and 0xFFFFFFFFL
             val body = pos + 8
-            // Streaming writers (some Android TTS engines) leave the length at 0 or -1.
-            if (len < 0 || body + len > bytes.size || (id == "data" && len == 0)) len = bytes.size - body
+            val remaining = (bytes.size - body).toLong()
+            // Streaming writers (some Android TTS engines) leave the length at 0 or -1, and a corrupt header can
+            // claim more than the file holds. Clamp in Long so the sum cannot overflow.
+            val len = if (declared > remaining || (id == "data" && declared == 0L)) remaining.toInt() else declared.toInt()
             when (id) {
                 "fmt " -> {
                     format = b.getShort(body).toInt() and 0xFFFF
@@ -49,6 +59,8 @@ object Wav {
         }
         require(dataStart >= 0) { "WAV has no data chunk" }
         require(format == 1 || format == 3) { "Unsupported WAV format $format" }
+        require(channels in 1..32) { "Unsupported channel count $channels" }
+        require(bits == 8 || bits == 16 || bits == 24 || bits == 32) { "Unsupported bit depth $bits" }
         val bytesPer = bits / 8
         val frames = dataLen / (bytesPer * channels)
         val out = FloatArray(frames)

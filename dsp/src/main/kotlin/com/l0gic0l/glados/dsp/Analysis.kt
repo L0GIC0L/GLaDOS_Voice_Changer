@@ -40,6 +40,12 @@ class Analysis(
         }
     }
 
+    /** Loudness near the top of the clip (95th percentile frame level), used to scale note thickness. */
+    val loudLevel: Float by lazy {
+        val sorted = level.sorted()
+        if (sorted.isEmpty()) 1e-4f else sorted[(sorted.size * 0.95).toInt().coerceAtMost(sorted.size - 1)].coerceAtLeast(1e-4f)
+    }
+
     private val median: Double by lazy {
         val v = (0 until frames).filter { voiced[it] }.map { midi(it) }.sorted()
         if (v.isEmpty()) Double.NaN else v[v.size / 2]

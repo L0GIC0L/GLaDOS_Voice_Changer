@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -298,5 +300,52 @@ class ScreensTest {
         rule.waitForIdle()
         assertEquals(DarkMode.LIGHT, vm.theme.value.darkMode)
         rule.onNodeWithText("System").performClick()
+    }
+
+    @Test
+    fun typedSpeechTextSurvivesSwitchingTabs() {
+        showApp()
+        go("speak")
+        rule.onNode(hasSetTextAction()).performTextReplacement("Remember me")
+        rule.waitForIdle()
+        go("live")
+        rule.onNodeWithText("Go live", useUnmergedTree = true).assertExists()
+        go("speak")
+        rule.onNodeWithText("Remember me").assertExists()
+    }
+
+    @Test
+    fun overlappingLoadsEndWithTheLastClip() {
+        val first = speechClip()
+        val second = Audio(first.samples.copyOf(first.samples.size / 2), first.sampleRate)
+        vm.loadAudio(first, "first", autoCorrect = false, autoplay = false)
+        vm.loadAudio(second, "second", autoCorrect = false, autoplay = false)
+        rule.waitUntil(timeoutMillis = 60_000) { vm.clip != null && vm.busy == null }
+        rule.waitForIdle()
+        assertEquals("the older load must not win", "second", vm.clip!!.title)
+        assertEquals(second.samples.size, vm.clip!!.audio.samples.size)
+    }
+
+    @Test
+    fun aRefusedSplitLeavesUndoAndRedoAlone() {
+        loadClip()
+        vm.resetNotes()
+        vm.undo()
+        assertTrue(vm.canRedo)
+        val note = vm.edit!!.notes[0]
+        vm.splitNote(0, note.f0 + 1) // too close to the edge: refused
+        assertTrue("a refused split wiped the redo history", vm.canRedo)
+        assertTrue(vm.message != null)
+        vm.redo()
+        assertTrue(vm.canUndo)
+    }
+
+    @Test
+    fun aUserPresetCannotShadowABuiltInOne() {
+        vm.saveUserPreset("portal 1")
+        assertTrue(vm.message != null)
+        assertTrue(vm.userPresets.value.isEmpty())
+        vm.saveUserPreset("Mine")
+        assertTrue(vm.userPresets.value.containsKey("Mine"))
     }
 }
