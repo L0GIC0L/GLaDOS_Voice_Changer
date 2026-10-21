@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer ring -->
+    <path
+        android:fillColor="#FFB74D"
+        android:fillType="evenOdd"
+        android:pathData="M54,54m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0M54,54m-21,0a21,21 0,1 0,42 0a21,21 0,1 0,-42 0" />
+    <!-- Eye -->
+    <path
+        android:fillColor="#FFB74D"
+        android:pathData="M54,54m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
+    <!-- Highlight -->
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M50,50m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+</vector>
