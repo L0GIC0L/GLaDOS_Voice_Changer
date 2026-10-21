@@ -55,6 +55,8 @@ import com.l0gic0l.glados.MainViewModel
 import com.l0gic0l.glados.Tool
 import com.l0gic0l.glados.dsp.NoteOps
 import com.l0gic0l.glados.dsp.Scales
+import com.l0gic0l.glados.model.Specs
+import com.l0gic0l.glados.ui.components.ParamControl
 import com.l0gic0l.glados.ui.components.rememberFrameTick
 import com.l0gic0l.glados.ui.editor.PianoRoll
 import com.l0gic0l.glados.ui.editor.RollControls
@@ -147,7 +149,7 @@ fun EditorScreen(vm: MainViewModel, goSpeak: () -> Unit) {
 
         SelectedNotes(vm, params)
         CorrectionCard(vm)
-        DetectionCard(vm)
+        DetectionCard(vm, params)
     }
 }
 
@@ -243,16 +245,40 @@ private fun CorrectionCard(vm: MainViewModel) {
 }
 
 @Composable
-private fun DetectionCard(vm: MainViewModel) {
+private fun DetectionCard(vm: MainViewModel, params: com.l0gic0l.glados.model.VoiceParams) {
+    val clip = vm.clip ?: return
+    val an = clip.analysis
+    val voicedPercent = (100.0 * an.voiced.count { it } / an.frames.coerceAtLeast(1)).roundToInt()
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Note detection", style = MaterialTheme.typography.titleMedium)
+            Text("Voice detection", style = MaterialTheme.typography.titleMedium)
             Text(
-                "How audio is cut into notes. Re-detecting discards your edits. Re-analyse after changing voice range or voicing sensitivity in the Voice tab.",
+                "Found ${vm.edit?.notes?.size ?: 0} notes. $voicedPercent% of the clip is pitched voice.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (voicedPercent < 20) {
+                Text(
+                    "Very little pitched voice was found. Raise Voicing sensitivity, widen the pitch range, or check that the recording is speech.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (vm.analysisStale) {
+                Text(
+                    "Detection settings changed after you made edits. Tap Re-analyse to apply them (edits will be lost).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            ParamControl(Specs.VOICING, params, vm::setParam)
+            ParamControl(Specs.FMIN, params, vm::setParam)
+            ParamControl(Specs.FMAX, params, vm::setParam)
+            Text(
+                "These re-analyse the clip automatically while you have not edited it yet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            LabeledSlider("Pitch change that starts a new note", vm.segTolerance, 30f..200f, "%.0f cents") { vm.segTolerance = it }
+            LabeledSlider("Pitch jump that starts a new note", vm.segTolerance, 30f..300f, "%.0f cents") { vm.segTolerance = it }
             LabeledSlider("Syllable splitting", vm.segSensitivity, 0f..100f, "%.0f %%") { vm.segSensitivity = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = vm::resegment) { Text("Re-detect notes") }

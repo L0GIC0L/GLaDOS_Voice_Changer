@@ -192,26 +192,22 @@ object NoteOps {
             val i1 = j - 1
             val starts = sortedSetOf(i0)
 
-            // Pitch steps.
-            var sum = an.midi(i0)
-            var cnt = 1
-            var pendStart = -1
-            var pending = 0
-            for (k in i0 + 1..i1) {
-                val m = an.midi(k)
-                if (abs(m - sum / cnt) * 100 > pitchTolCents) {
-                    if (pending == 0) pendStart = k
-                    pending++
-                    if (pending >= 3) {
-                        starts += pendStart
-                        sum = 0.0; cnt = 0
-                        for (q in pendStart..k) { sum += an.midi(q); cnt++ }
-                        pending = 0
+            // Pitch jumps. A smooth glide (a rising question, a falling phrase end) is one note, so compare each
+            // frame with where the recent trend predicts it, not with the note's average. A frame that lands far
+            // from that prediction, twice in a row, is a new note.
+            var off = 0
+            var offStart = -1
+            for (k in i0 + 4..i1) {
+                val predicted = an.midi(k - 1) + (an.midi(k - 1) - an.midi(k - 4)) / 3.0
+                if (abs(an.midi(k) - predicted) * 100 > pitchTolCents) {
+                    if (off == 0) offStart = k
+                    off++
+                    if (off >= 2) {
+                        starts += offStart
+                        off = 0
                     }
                 } else {
-                    pending = 0
-                    sum += m
-                    cnt++
+                    off = 0
                 }
             }
 

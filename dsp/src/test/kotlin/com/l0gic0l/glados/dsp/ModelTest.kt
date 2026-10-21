@@ -67,13 +67,19 @@ class ModelTest {
 
     @Test
     fun tunerSnapsHoldsAndSmooths() {
+        // (hysteresis only engages after the first few settled frames of a phrase)
         val t = Tuner(0.0029)
         t.retuneMs = 0.0
         assertEquals(60.0, t.update(60.3, true), 1e-9)
+        repeat(5) { t.update(60.3, true) } // let the pitch settle: hysteresis starts after the first few frames
         // Hysteresis keeps the note until the pitch is clearly nearer the next one.
         t.holdSemitones = 0.25
         assertEquals(60.0, t.update(60.6, true), 1e-9)
         assertEquals(61.0, t.update(60.9, true), 1e-9)
+        // A wrong first guess at the start of a phrase is not held.
+        t.reset(); t.strength = 1.0
+        assertEquals(60.0, t.update(60.4, true), 1e-9)
+        assertEquals(61.0, t.update(60.55, true), 1e-9)
         // Strength blends toward the target.
         t.reset(); t.strength = 0.5
         assertEquals(60.15, t.update(60.3, true), 1e-9)

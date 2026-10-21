@@ -110,7 +110,7 @@ object Specs {
     val FMIN = slider("fmin", "Lowest pitch", Group.VOICE, 50f, 300f, 85f, 5f, "Hz", "Lowest voice pitch to track. Lower values add latency.")
     val FMAX = slider("fmax", "Highest pitch", Group.VOICE, 300f, 1200f, 700f, 10f, "Hz")
     val GATE = slider("gateDb", "Noise gate", Group.VOICE, -80f, -20f, -58f, 1f, "dB", "Silences input quieter than this.")
-    val VOICING = slider("voicing", "Voicing sensitivity", Group.VOICE, 0f, 100f, 55f, 1f, "%", "Higher treats more sound as pitched. Lower leaves breathy or noisy parts untouched.")
+    val VOICING = slider("voicing", "Voicing sensitivity", Group.VOICE, 0f, 100f, 60f, 1f, "%", "How readily sound counts as pitched voice. Raise it for quiet, noisy, breathy or echoey recordings; lower it if background sound is being tuned.")
     val BREATH = slider("breath", "Breath and consonants", Group.VOICE, 0f, 200f, 80f, 1f, "%", "Level of unpitched sound such as s and t.")
     val DRY = slider("dry", "Dry voice", Group.VOICE, 0f, 100f, 0f, 1f, "%", "Blend in the unprocessed voice.")
 

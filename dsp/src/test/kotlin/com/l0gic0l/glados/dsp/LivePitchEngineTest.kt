@@ -238,13 +238,13 @@ class LivePitchEngineTest {
 
     @Test
     fun oddBlockSizesAreEquivalentlyStable() {
-        val x = TestSignals.voice(sr, 1.5, { 170.0 })
+        val x = TestSignals.voice(sr, 1.5, { 176.0 })
         for (block in intArrayOf(64, 100, 240, 480, 1024)) {
             val (y, e) = run(x, base(), block)
             assertSane(y)
             assertEquals("block $block", 0, e.starvedGrains)
             val med = TestSignals.median(TestSignals.pitchTrack(y, sr, sr / 2, y.size))
-            val expected = Pitch.midiToHz(round(Pitch.hzToMidi(170.0)))
+            val expected = Pitch.midiToHz(round(Pitch.hzToMidi(176.0)))
             assertEquals("block $block", 0.0, TestSignals.cents(med, expected), 12.0)
         }
     }

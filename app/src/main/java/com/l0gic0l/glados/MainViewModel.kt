@@ -38,7 +38,7 @@ import kotlin.math.roundToInt
 
 enum class Tool { PITCH, TIME, SPLIT }
 
-class ClipState(val audio: Audio, val analysis: Analysis, val title: String)
+class ClipState(val audio: Audio, val analysis: Analysis, val title: String, val autoCorrect: Boolean)
 
 private data class RenderKey(
     val shift: Float, val formant: Float, val follow: Float, val autoReg: Boolean, val regHz: Float, val breath: Float, val a4: Float,
@@ -79,11 +79,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var segTolerance by mutableFloatStateOf(80f)
     var segSensitivity by mutableFloatStateOf(50f)
 
+    /** True when detection settings changed after edits were made, so the notes no longer match the settings. */
+    var analysisStale by mutableStateOf(false)
+        private set
+
     private val undoStack = ArrayDeque<Edit>()
     private val redoStack = ArrayDeque<Edit>()
     private var lastCoalesce: String? = null
     private var lastMutation = 0L
     private var renderJob: Job? = null
+    private var reanalyseJob: Job? = null
     private var dry: FloatArray? = null
 
     init {
@@ -95,6 +100,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     it[Specs.REG_HZ], it[Specs.BREATH], it[Specs.REF_A4],
                 )
             }.distinctUntilChanged().drop(1).collect { scheduleRender(80) }
+        }
+        // Voice-range and voicing settings change what counts as a note, so the clip has to be analysed again.
+        viewModelScope.launch {
+            params.map { Triple(it[Specs.VOICING], it[Specs.FMIN], it[Specs.FMAX]) }
+                .distinctUntilChanged().drop(1).collect { onDetectionSettingsChanged() }
+        }
+    }
+
+    private fun onDetectionSettingsChanged() {
+        val cs = clip ?: return
+        if (undoStack.isEmpty()) {
+            // Nothing has been edited yet, so re-analysing loses nothing: do it automatically.
+            reanalyseJob?.cancel()
+            reanalyseJob = viewModelScope.launch {
+                delay(500)
+                loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false)
+            }
+        } else {
+            analysisStale = true
         }
     }
 
@@ -235,7 +259,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-runs pitch analysis on the current audio, for when the voice range or sensitivity settings changed. Edits are lost. */
     fun reanalyse() {
         val cs = clip ?: return
-        loadAudio(cs.audio, cs.title, autoCorrect = false, autoplay = false)
+        loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false)
     }
 
     fun resegment() {
@@ -269,7 +293,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 if (e.notes.isEmpty()) message = "No pitched voice found. It will play back unchanged."
-                clip = ClipState(audio, an, title)
+                clip = ClipState(audio, an, title, autoCorrect)
+                analysisStale = false
                 edit = e
                 selection = emptySet()
                 undoStack.clear()
@@ -321,7 +346,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             recording = false
             val audio = recorder.stop()
-            if (audio == null) message = "Nothing was recorded." else loadAudio(audio, "Recording", autoCorrect = false, autoplay = false)
+            if (audio == null) message = "Nothing was recorded." else loadAudio(audio, "Recording", autoCorrect = true, autoplay = true)
         }
     }
 
@@ -330,7 +355,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             busy = "Decoding..."
             try {
                 val audio = withContext(Dispatchers.IO) { AudioDecoder.decode(getApplication(), uri) }
-                loadAudio(audio, "Imported audio", autoCorrect = false, autoplay = false)
+                loadAudio(audio, "Imported audio", autoCorrect = true, autoplay = true)
             } catch (ex: Exception) {
                 busy = null
                 message = "Could not read that file: ${ex.message}"

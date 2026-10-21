@@ -65,6 +65,16 @@ class LiveController(
     var targetMidi = Int.MIN_VALUE
         private set
 
+    /** True while the latest analysis frame is pitched voice. */
+    @Volatile
+    var voiceDetected = false
+        private set
+
+    /** True when the mic has been hearing sound for a while but no pitched voice: noise, whisper, or settings too strict. */
+    @Volatile
+    var noVoiceWarning = false
+        private set
+
     @Volatile private var thread: Thread? = null
     @Volatile private var stopRequested = false
 
@@ -155,6 +165,7 @@ class LiveController(
             track.play()
             val deviceLatency = (track.bufferSizeInFrames + record.bufferSizeInFrames / 2) * 1000 / sr
             var frame = 0
+            var loudUnpitchedSamples = 0L
             while (!stopRequested) {
                 val inId = inputDeviceId
                 if (inId != appliedIn) {
@@ -198,6 +209,12 @@ class LiveController(
                 outputLevel = peakOut
                 track.write(out, 0, n, AudioTrack.WRITE_BLOCKING)
 
+                // Sustained loud-but-unpitched input means detection is failing, not that the speaker paused.
+                val pitched = engine.inputHz > 0
+                voiceDetected = pitched && !bypass
+                loudUnpitchedSamples = if (peakIn > 0.02f && !pitched) loudUnpitchedSamples + n else 0L
+                noVoiceWarning = loudUnpitchedSamples > sr * 3L / 2
+
                 if (++frame % 4 == 0) {
                     trace.push(engine.inputHz.toFloat(), if (bypass) engine.inputHz.toFloat() else engine.outputHz.toFloat())
                     targetMidi = engine.targetMidi
@@ -210,6 +227,8 @@ class LiveController(
             track.release()
             inputLevel = 0f
             outputLevel = 0f
+            voiceDetected = false
+            noVoiceWarning = false
             trace.clear()
             thread = null
             if (_state.value.error == null) _state.value = LiveState()

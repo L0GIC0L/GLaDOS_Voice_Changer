@@ -39,11 +39,22 @@ Effects are applied in real time during playback, so you can move sliders in the
 
 **Voice.** The groups are Tuning (key, scale including custom notes, retune speed, strength, note hold, pitch shift, register matching, monotone, vibrato), Voice (formants, detection range, noise gate, breath and consonants, dry mix), Robot (ring mod, metallic comb and flange, bit crush, glitch), Space (echo, reverb) and EQ and output. Double-tap a slider's name to reset it. Presets: Portal 1, Portal 2, PotatOS, Hard tune, Natural. You can save your own.
 
+## If it is not picking up your voice
+
+The Live tab shows *Voice detected* when pitch is being tracked, and warns when the mic hears sound but no pitched voice. The Editor's *Voice detection* card shows how much of a clip was found. If detection is poor:
+
+- Raise **Voicing sensitivity** (Voice tab). Higher means more sound counts as voice. The default suits normal speech; quiet, noisy, breathy or echoey recordings want it higher.
+- Check **Lowest pitch** and **Highest pitch** cover your voice (defaults 85 and 700 Hz).
+- Lower the **Noise gate** if the mic level is low.
+- Speak closer to the mic and away from fans and traffic. Low rumble and hiss are filtered out for pitch tracking, but loud room echo is still hard on any pitch tracker.
+
+In the Editor, changing these settings re-analyses the clip automatically as long as you have not edited it yet.
+
 ## How it works
 
 The DSP is plain Kotlin in the `dsp` module, with no Android dependencies, so it is unit-tested on the JVM.
 
-- **Pitch tracking**: YIN on a decimated copy of the signal, refined at full rate.
+- **Pitch tracking**: YIN on a decimated copy of the signal, refined at full rate. The tracker listens to a band-passed copy (rumble and hiss removed) that is never heard, and keeps a note voiced through brief dips, so phone recordings work.
 - **Pitch correction**: TD-PSOLA. Short windowed grains are cut from the input at pitch marks and laid down at the spacing of the *target* pitch. That changes pitch while keeping the original vocal tract, so voices stay natural instead of chipmunking. Grains can also be stretched or squeezed to move the formants independently.
 - **Tuner**: snaps to the nearest allowed note with hysteresis. Retune speed smooths the *correction*, not the pitch, so 0 ms gives hard robotic steps and larger values let natural glides through.
 - **Register matching**: measures your average pitch and shifts it to a target (default 215 Hz), and moves the formants part of the way with it, so a deep voice lands near GLaDOS without manual tuning.

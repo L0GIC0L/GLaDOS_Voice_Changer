@@ -126,6 +126,22 @@ fun LiveScreen(vm: MainViewModel) {
                     else "Pitch trace appears here while live",
                     style = MaterialTheme.typography.labelLarge,
                 )
+                if (state.running) {
+                    val detected = vm.live.voiceDetected
+                    Text(
+                        if (detected) "Voice detected" else "Listening...",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (detected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (vm.live.noVoiceWarning) {
+                        Text(
+                            "The mic is hearing sound but no pitched voice. Speak closer, raise Voicing sensitivity or lower " +
+                                "Lowest pitch in the Voice tab, and try a quieter room.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
                 Meter("Mic", inLevel)
                 Meter("Output", outLevel)
             }

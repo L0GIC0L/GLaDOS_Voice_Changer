@@ -56,6 +56,8 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
 
     // ---- input side ----
     private val inBuf = FloatArray(RING)
+    private val anaBuf = FloatArray(RING) // band-passed copy, for pitch analysis only
+    private lateinit var band: PitchBandpass
     private var wIn = 0L
     private var dcX = 0f
     private var dcY = 0f
@@ -73,6 +75,7 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
     private var fCount = 0L
     private var hang = 0
     private var lastF0 = 0.0
+    private var wasPeriodic = false
     private val med = DoubleArray(3)
     private var medN = 0
     private var vibPhase = 0.0
@@ -124,6 +127,7 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
             fmin = newMin
             fmax = newMax
             yin = Yin(sampleRate, fmin, fmax)
+            band = PitchBandpass(sampleRate, fmin, fmax)
             dMap = (3.5 * sampleRate / fmin).roundToInt() + 64
             resetStreams()
         }
@@ -135,7 +139,7 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
         breath = p[Specs.BREATH] / 100f
         dry = p[Specs.DRY] / 100f
         gateLin = 10f.pow(p[Specs.GATE] / 20f)
-        yinThreshold = 0.30 - 0.25 * p[Specs.VOICING] / 100.0
+        yinThreshold = Voicing.threshold(p[Specs.VOICING])
         autoRegister = p.bool(Specs.AUTO_REG)
         registerMidi = Pitch.hzToMidi(p[Specs.REG_HZ].toDouble(), a4)
         vibratoDepth = p[Specs.VIB_DEPTH] / 100.0
@@ -152,6 +156,9 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
     /** Clears audio state while keeping the configuration. */
     fun resetStreams() {
         inBuf.fill(0f)
+        anaBuf.fill(0f)
+        band.reset()
+        wasPeriodic = false
         acc.fill(0f)
         norm.fill(0f)
         wIn = 0
@@ -200,7 +207,9 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
             gateOpen = gateHold > 0
             gateGain += ((if (gateOpen) 1f else 0f) - gateGain) * (if (gateOpen) attack else release)
 
-            inBuf[wIn.toInt() and MASK] = x * gateGain
+            val gated = x * gateGain
+            inBuf[wIn.toInt() and MASK] = gated
+            anaBuf[wIn.toInt() and MASK] = band.process(gated)
             wIn++
             if (++sinceDetect >= HOP) {
                 sinceDetect = 0
@@ -215,7 +224,14 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
             pushFrame(false, 0.0, 0.0)
             return
         }
-        val periodic = yin.detect(inBuf, MASK, (wIn - window).toInt(), yinThreshold)
+        yin.detect(anaBuf, MASK, (wIn - window).toInt(), yinThreshold)
+        // Hysteresis: a clear onset needs the strict threshold, but once voiced, a frame stays voiced while
+        // it is still fairly periodic and its pitch is continuous. Keeps vowels from flickering.
+        val clear = yin.aperiodicity < yinThreshold
+        val continuing = wasPeriodic && lastF0 > 0.0 && yin.aperiodicity < yinThreshold * 1.5 &&
+            abs(Math.log(yin.f0 / lastF0)) < 0.12
+        val periodic = clear || continuing
+        wasPeriodic = periodic && gateOpen
         var voiced = periodic && gateOpen
         var f0 = yin.f0
         if (voiced) {
@@ -319,7 +335,7 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
             val from = max(startTime, lastMarkPos + 1)
             val len = period.toInt()
             if (from + len + 2 > wIn || from < wIn - RING / 2) return
-            pushMark(Marks.peak(inBuf, MASK, from, len))
+            pushMark(Marks.peak(anaBuf, MASK, from, len))
             chain = true
             chainPeriod = period
         }
@@ -337,7 +353,7 @@ class LivePitchEngine(private val sampleRate: Int, params: VoiceParams = VoicePa
                 chain = false
                 break
             }
-            pushMark(Marks.next(inBuf, MASK, last, period))
+            pushMark(Marks.next(anaBuf, MASK, last, period))
         }
     }
 

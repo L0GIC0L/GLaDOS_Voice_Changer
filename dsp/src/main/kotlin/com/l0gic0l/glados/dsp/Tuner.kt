@@ -10,6 +10,10 @@ import kotlin.math.exp
  * smooth the *correction* rather than the pitch, so natural glides survive at slow speeds.
  */
 class Tuner(private val frameSeconds: Double) {
+    private companion object {
+        const val SETTLE_FRAMES = 4
+    }
+
     var mask: Int = Scales.CHROMATIC_MASK
     var retuneMs: Double = 20.0
     var strength: Double = 1.0
@@ -20,10 +24,12 @@ class Tuner(private val frameSeconds: Double) {
     private var currentTarget = Int.MIN_VALUE
     private var smoothed = 0.0
     private var wasVoiced = false
+    private var voicedFrames = 0
 
     fun reset() {
         currentTarget = Int.MIN_VALUE
         wasVoiced = false
+        voicedFrames = 0
     }
 
     /** Target note (MIDI) most recently chosen, or [Int.MIN_VALUE] if none. */
@@ -36,12 +42,18 @@ class Tuner(private val frameSeconds: Double) {
     fun update(midiIn: Double, voiced: Boolean): Double {
         if (!voiced) {
             wasVoiced = false
+            voicedFrames = 0
             return midiIn
         }
+        voicedFrames++
         val nearest = if (monotone) monotoneNote else Scales.nearestAllowed(midiIn, mask)
         var tgt = nearest
-        if (!monotone && wasVoiced && currentTarget != Int.MIN_VALUE && Scales.isAllowed(mask, currentTarget) && nearest != currentTarget) {
-            // Hysteresis: stay on the current note until the new one is clearly closer.
+        if (!monotone && wasVoiced && voicedFrames > SETTLE_FRAMES && currentTarget != Int.MIN_VALUE &&
+            Scales.isAllowed(mask, currentTarget) && nearest != currentTarget
+        ) {
+            // Hysteresis: stay on the current note until the new one is clearly closer. Not applied for the
+            // first few frames of a phrase, when the pitch estimate is still settling and a wrong first guess
+            // must not be held.
             if (abs(midiIn - currentTarget) < abs(midiIn - nearest) + holdSemitones) tgt = currentTarget
         }
         currentTarget = tgt
