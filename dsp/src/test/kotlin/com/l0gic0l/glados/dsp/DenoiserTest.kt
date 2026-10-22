@@ -126,6 +126,50 @@ class DenoiserTest {
     }
 
     @Test
+    fun noiseThatSlowlySwellsAndFadesIsRemovedThroughout() {
+        // The phrase twice over, with noise that swells slowly from 6 dB below its average level to 6 dB above and back,
+        // as a phone's automatic gain or a drifting fan would.
+        val one = phrase()
+        val clean = FloatArray(one.size * 2).also { System.arraycopy(one, 0, it, 0, one.size); System.arraycopy(one, 0, it, one.size, one.size) }
+        val r = Random(6)
+        val noisy = FloatArray(clean.size) {
+            val level = Math.pow(10.0, -0.3 * cos(2 * PI * it / clean.size))
+            clean[it] + (r.nextGaussian() * 0.01 * level).toFloat()
+        }
+        val y = Denoiser.process(noisy, sr, 0.5f)
+        fun pauseDrop(from: Int, to: Int): Double {
+            var a = 0.0
+            var b = 0.0
+            for (i in from until to) if (clean[i] == 0f) { a += noisy[i] * noisy[i].toDouble(); b += y[i] * y[i].toDouble() }
+            return 10 * log10(a / b)
+        }
+        val quarter = clean.size / 4
+        val quiet = pauseDrop(0, quarter)
+        val loud = pauseDrop(quarter, 3 * quarter)
+        println("drifting noise: pauses down ${"%.1f".format(quiet)} dB where it is quiet, ${"%.1f".format(loud)} dB where it is loud")
+        assertTrue("quiet half only $quiet dB", quiet > 10.0)
+        assertTrue("loud half only $loud dB", loud > 10.0)
+    }
+
+    @Test
+    fun aLongRecordingIsQuick() {
+        val sr48 = 48000
+        val r = Random(7)
+        val x = FloatArray(sr48 * 120) { (0.1 * kotlin.math.sin(it * 0.05) + r.nextGaussian() * 0.01).toFloat() }
+        Denoiser.process(x.copyOf(sr48 * 5), sr48, 0.5f) // warm up the JIT
+        val rt = Runtime.getRuntime()
+        System.gc()
+        val before = rt.totalMemory() - rt.freeMemory()
+        val t0 = System.nanoTime()
+        val y = Denoiser.process(x, sr48, 0.5f)
+        val ms = (System.nanoTime() - t0) / 1e6
+        val after = rt.totalMemory() - rt.freeMemory()
+        println("120 s at 48 kHz: ${"%.0f".format(ms)} ms, about ${(after - before) / 1_000_000} MB held afterwards including the 23 MB result")
+        assertEquals(x.size, y.size)
+        assertTrue("took $ms ms", ms < 20_000)
+    }
+
+    @Test
     fun veryShortClipsWork() {
         val x = noise(100, 0.1, 5)
         val y = Denoiser.process(x, 8000, 0.7f)

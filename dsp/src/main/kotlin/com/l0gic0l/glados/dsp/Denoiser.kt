@@ -2,6 +2,8 @@ package com.l0gic0l.glados.dsp
 
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -12,7 +14,8 @@ import kotlin.math.sqrt
  * Offline noise reduction for steady background noise: hiss, fans, air conditioning, hum.
  *
  * The clip is cut into overlapping short-time spectra. The noise spectrum is learned from the clip itself, as the
- * average of its quietest frames (the pauses between words). Each frequency is then scaled by a Wiener gain whose
+ * average of its quietest frames (the pauses between words), and its level is then followed through the clip so noise
+ * that swells and fades (a fan, a phone's automatic gain) is still removed evenly. Each frequency is then scaled by a Wiener gain whose
  * signal-to-noise estimate uses the decision-directed rule of Ephraim and Malah, which removes noise with far less
  * of the warbling "musical noise" left by plain spectral subtraction, refined by the second step of Plapous, Marro
  * and Scalart's two-step noise reduction so the estimate does not lag a frame behind word onsets and endings. A floor
@@ -27,6 +30,18 @@ object Denoiser {
 
     /** Share of frames, quietest first, averaged into the noise estimate. */
     private const val QUIET_SHARE = 0.1
+
+    /** Per-frame smoothing of the noise level tracker. */
+    private const val TRACK_SMOOTHING = 0.95
+
+    /** The tracker's fixed a-priori SNR for "speech is present", 15 dB (Gerkmann and Hendriks). */
+    private const val XI_SPEECH = 31.6
+
+    /** The tracked level sits a little low on average; this brings it back to the true noise level. */
+    private const val LEVEL_BIAS = 1.2
+
+    /** The tracker only needs the overall level, so it follows every fourth frequency bin. */
+    private const val TRACK_STEP = 4
 
     /**
      * Returns a cleaned copy of [x]. [amount] 0..1 sets how far noise may be pushed down (up to about 30 dB) and how
@@ -47,10 +62,11 @@ object Denoiser {
         System.arraycopy(x, 0, padded, n, x.size)
         val frames = (padded.size - n) / hop + 1
 
-        val noise = noiseSpectrum(padded, frames, hop, win, fft) ?: return x
+        val profile = noiseSpectrum(padded, frames, hop, win, fft) ?: return x
+        val levels = noiseLevels(padded, frames, hop, win, fft, profile, cancelled)
         val overSubtract = 1.0 + 0.75 * t
         val floor = 10.0.pow(-30.0 * t / 20.0)
-        for (k in 0 until bins) noise[k] = max(noise[k] * overSubtract, 1e-20)
+        val noise = DoubleArray(bins)
 
         val re = DoubleArray(n)
         val im = DoubleArray(n)
@@ -60,6 +76,7 @@ object Denoiser {
         for (f in 0 until frames) {
             if (f % 64 == 0 && cancelled()) break
             val start = f * hop
+            for (k in 0 until bins) noise[k] = max(profile[k] * levels[f] * overSubtract, 1e-20)
             for (i in 0 until n) {
                 re[i] = (padded[start + i] * win[i]).toDouble()
                 im[i] = 0.0
@@ -116,6 +133,67 @@ object Denoiser {
         val take = max(min(8, idx.size), (idx.size * QUIET_SHARE).toInt())
         val quiet = idx.sortedBy { energy[it] }.take(take).toIntArray()
         return quietSpectrum(padded, quiet, hop, win, fft)
+    }
+
+    /**
+     * How loud the noise is in each frame, relative to [profile]. Gerkmann and Hendriks's speech-presence-probability
+     * tracker follows the noise in every bin, forwards and then backwards through the clip, starting from the profile;
+     * only the overall level is kept (the geometric mean over bins), so the profile's shape stays put, and the smaller
+     * of the two directions is used, so a tracker still catching up after a word is not mistaken for louder noise.
+     * Frames of exact digital silence leave the level unchanged. Memory is one number per frame per direction.
+     */
+    private fun noiseLevels(
+        padded: FloatArray, frames: Int, hop: Int, win: FloatArray, fft: Fft, profile: DoubleArray, cancelled: () -> Boolean,
+    ): DoubleArray {
+        val forward = trackLevels(padded, 0 until frames, frames, hop, win, fft, profile, cancelled)
+        val backward = trackLevels(padded, frames - 1 downTo 0, frames, hop, win, fft, profile, cancelled)
+        return DoubleArray(frames) { min(forward[it], backward[it]) * LEVEL_BIAS }
+    }
+
+    private fun trackLevels(
+        padded: FloatArray, order: IntProgression, frames: Int, hop: Int, win: FloatArray, fft: Fft, profile: DoubleArray,
+        cancelled: () -> Boolean,
+    ): DoubleArray {
+        val n = win.size
+        val bins = profile.size
+        val silence = 1e-12 * n
+        val noise = profile.copyOf()
+        val levels = DoubleArray(frames)
+        val re = DoubleArray(n)
+        val im = DoubleArray(n)
+        var level = 1.0
+        var count = 0
+        for (f in order) {
+            if (++count % 64 == 0 && cancelled()) break
+            val s = f * hop
+            var e = 0.0
+            for (i in 0 until n) {
+                val v = padded[s + i] * win[i]
+                re[i] = v.toDouble()
+                im[i] = 0.0
+                e += v * v
+            }
+            if (e > silence) {
+                fft.transform(re, im, inverse = false)
+                var logSum = 0.0
+                var used = 0
+                var k = 1
+                while (k < bins - 1) {
+                    val y = re[k] * re[k] + im[k] * im[k]
+                    // Probability that speech is present in this bin, given how far it stands above the noise.
+                    val p = 1.0 / (1.0 + (1.0 + XI_SPEECH) * exp(-y / max(noise[k], 1e-30) * XI_SPEECH / (1.0 + XI_SPEECH)))
+                    noise[k] = TRACK_SMOOTHING * noise[k] + (1 - TRACK_SMOOTHING) * ((1 - p) * y + p * noise[k])
+                    if (profile[k] > 0.0) {
+                        logSum += ln(max(noise[k], 1e-30) / profile[k])
+                        used++
+                    }
+                    k += TRACK_STEP
+                }
+                if (used > 0) level = exp(logSum / used)
+            }
+            levels[f] = level
+        }
+        return levels
     }
 
     private fun quietSpectrum(padded: FloatArray, frames: IntArray, hop: Int, win: FloatArray, fft: Fft): DoubleArray? {

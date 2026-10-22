@@ -117,6 +117,23 @@ class DenoiseBenchTest {
         }.also { y -> val g = 1.0 / rms(y); for (i in y.indices) y[i] = (y[i] * g).toFloat() }
     }
 
+    /** [clean] with its quiet 20 ms frames cut out, as if the talker never paused. */
+    private fun withoutPauses(clean: FloatArray, sr: Int, active: BooleanArray): FloatArray {
+        val w = sr / 50
+        val out = FloatArray(active.count { it } * w)
+        var o = 0
+        for (f in active.indices) if (active[f]) { System.arraycopy(clean, f * w, out, o, w); o += w }
+        return out
+    }
+
+    /** [x] swelling and fading by up to 6 dB, one slow cycle over the clip, at the same overall level. */
+    private fun drift(x: FloatArray): FloatArray {
+        val y = FloatArray(x.size) { (x[it] * 10.0.pow(0.3 * sin(2 * PI * it / x.size))).toFloat() }
+        val g = 1.0 / rms(y)
+        for (i in y.indices) y[i] = (y[i] * g).toFloat()
+        return y
+    }
+
     private fun detection(ref: Analysis, an: Analysis): Pair<Double, Double> {
         var tp = 0; var fp = 0; var fn = 0
         for (i in 0 until minOf(ref.frames, an.frames)) {
@@ -148,20 +165,29 @@ class DenoiseBenchTest {
                 val ms = (System.nanoTime() - t0) / 1e6
                 println("NR %-14s clean-in amount=%.2f changedBy=%5.1f dB SNR  speed=%.0f ms per audio second".format(f.name, amount, snr(clean, dc), ms / a.seconds))
             }
+            // Kinds ending in -nopause use the speech run together so no frame is free of it; -drift makes the noise
+            // level wander slowly by up to 6 dB either way.
+            val unpaused = withoutPauses(clean, sr, act)
+            val unpausedAct = activity(unpaused, sr)
+            val unpausedRef by lazy { if (detect) Analyzer.analyze(unpaused, sr, p) else null }
             for (kind in kinds) for (snrIn in snrs) {
-                val nz = noise(kind, clean.size, sr, 7)
-                val g = rms(clean) / 10.0.pow(snrIn / 20)
-                val noisy = FloatArray(clean.size) { (clean[it] + nz[it] * g).toFloat() }
-                val (kIn, rIn) = pauseKurtosisAndRms(noisy, sr, act)
-                val detIn = ref?.let { detection(it, Analyzer.analyze(noisy, sr, p)) }
+                val nopause = kind.endsWith("-nopause")
+                val speech = if (nopause) unpaused else clean
+                val sAct = if (nopause) unpausedAct else act
+                val sRef = if (nopause) unpausedRef else ref
+                val nz = noise(kind.substringBefore('-'), speech.size, sr, 7).let { if (kind.endsWith("-drift")) drift(it) else it }
+                val g = rms(speech) / 10.0.pow(snrIn / 20)
+                val noisy = FloatArray(speech.size) { (speech[it] + nz[it] * g).toFloat() }
+                val (kIn, rIn) = pauseKurtosisAndRms(noisy, sr, sAct)
+                val detIn = sRef?.let { detection(it, Analyzer.analyze(noisy, sr, p)) }
                 for (amount in amounts) {
                     val y = Denoiser.process(noisy, sr, amount)
-                    val dSnr = snr(clean, y) - snr(clean, noisy)
-                    val dSeg = segSnr(clean, y, sr, act) - segSnr(clean, noisy, sr, act)
-                    val (kOut, rOut) = pauseKurtosisAndRms(y, sr, act)
+                    val dSnr = snr(speech, y) - snr(speech, noisy)
+                    val dSeg = segSnr(speech, y, sr, sAct) - segSnr(speech, noisy, sr, sAct)
+                    val (kOut, rOut) = pauseKurtosisAndRms(y, sr, sAct)
                     val drop = 20 * log10(rIn / rOut)
                     val musical = 10 * log10(kOut / kIn)
-                    val detOut = ref?.let { detection(it, Analyzer.analyze(y, sr, p)) }
+                    val detOut = sRef?.let { detection(it, Analyzer.analyze(y, sr, p)) }
                     println(
                         "NR %-14s %-5s snr=%4.0f amount=%.2f  dSNR=%+5.1f dSegSNR=%+5.1f pauseDrop=%5.1f dB musical=%+5.2f dB %s".format(
                             f.name, kind, snrIn, amount, dSnr, dSeg, drop, musical,
