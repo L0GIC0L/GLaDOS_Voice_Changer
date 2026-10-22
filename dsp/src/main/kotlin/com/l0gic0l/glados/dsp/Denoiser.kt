@@ -14,8 +14,9 @@ import kotlin.math.sqrt
  * The clip is cut into overlapping short-time spectra. The noise spectrum is learned from the clip itself, as the
  * average of its quietest frames (the pauses between words). Each frequency is then scaled by a Wiener gain whose
  * signal-to-noise estimate uses the decision-directed rule of Ephraim and Malah, which removes noise with far less
- * of the warbling "musical noise" left by plain spectral subtraction. A floor on the gain bounds how much is taken
- * away, so quiet speech is turned down a little rather than gated out.
+ * of the warbling "musical noise" left by plain spectral subtraction, refined by the second step of Plapous, Marro
+ * and Scalart's two-step noise reduction so the estimate does not lag a frame behind word onsets and endings. A floor
+ * on the gain bounds how much is taken away, so quiet speech is turned down a little rather than gated out.
  */
 object Denoiser {
     /** Smoothing of the decision-directed estimate; 0.98 is the classic value. */
@@ -47,13 +48,13 @@ object Denoiser {
         val frames = (padded.size - n) / hop + 1
 
         val noise = noiseSpectrum(padded, frames, hop, win, fft) ?: return x
-        val overSubtract = 1.0 + 0.5 * t
+        val overSubtract = 1.0 + 0.75 * t
         val floor = 10.0.pow(-30.0 * t / 20.0)
         for (k in 0 until bins) noise[k] = max(noise[k] * overSubtract, 1e-20)
 
         val re = DoubleArray(n)
         val im = DoubleArray(n)
-        val prevClean = DoubleArray(bins) // |S|^2 estimate from the previous frame
+        val prevClean = DoubleArray(bins) // |S|^2 estimate from the previous frame, before the floor
         val out = FloatArray(padded.size)
         var first = true
         for (f in 0 until frames) {
@@ -69,8 +70,13 @@ object Denoiser {
                 val gamma = power / noise[k]
                 val ml = max(gamma - 1.0, 0.0)
                 val xi = if (first) max(ml, XI_MIN) else max(ALPHA * prevClean[k] / noise[k] + (1 - ALPHA) * ml, XI_MIN)
-                val g = max(xi / (1.0 + xi), floor)
-                prevClean[k] = g * g * power
+                val g1 = xi / (1.0 + xi)
+                // The floor is left out of the recursion: fed back, it makes the estimate follow the leftover noise,
+                // which twinkles at gentle settings.
+                prevClean[k] = g1 * g1 * power
+                // Second step: re-estimate the SNR from this frame's own first estimate, removing the one-frame lag.
+                val xi2 = max(g1 * g1 * gamma, XI_MIN)
+                val g = max(xi2 / (1.0 + xi2), floor)
                 re[k] *= g
                 im[k] *= g
                 if (k in 1 until n / 2) {
