@@ -13,7 +13,12 @@ class ThemeSettings(val dynamicColor: Boolean = true, val darkMode: DarkMode = D
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("glados", Context.MODE_PRIVATE)
 
-    fun loadParams(): VoiceParams = readMap(sp.getString(KEY_PARAMS, null))?.let(VoiceParams::fromMap) ?: VoiceParams.defaults()
+    fun loadParams(): VoiceParams {
+        val saved = readMap(sp.getString(KEY_PARAMS, null)) ?: return VoiceParams.defaults()
+        // Settings saved before noise reduction existed also carry the old "match target register" default, which raised
+        // every voice toward GLaDOS's pitch. Drop it so those installs pick up the new default (off).
+        return VoiceParams.fromMap(if ("denoise" in saved) saved else saved - "autoReg")
+    }
 
     fun saveParams(p: VoiceParams) {
         sp.edit { putString(KEY_PARAMS, JSONObject(p.toMap()).toString()) }
