@@ -1,10 +1,10 @@
 package com.l0gic0l.glados.dsp
 
+import com.l0gic0l.glados.model.Macros
 import com.l0gic0l.glados.model.Presets
 import com.l0gic0l.glados.model.Specs
 import com.l0gic0l.glados.model.VoiceParams
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,6 +28,23 @@ class ModelTest {
             }
         }
         assertEquals(VoiceParams.defaults(), Presets.all.first().apply())
+        assertEquals("preset names must be unique", Presets.all.size, Presets.all.map { it.name.lowercase() }.toSet().size)
+        for (p in Presets.all) assertEquals(p.name, Presets.matching(p.apply())?.name)
+    }
+
+    @Test
+    fun simpleModeSlidersLandWhereTheyAreSet() {
+        for (start in listOf(VoiceParams.defaults(), Presets.all.first { it.name == "Natural" }.apply())) {
+            for (m in Macros.all) {
+                for (v in floatArrayOf(0f, 40f, 100f)) {
+                    assertEquals("${m.id} -> $v", v, m.read(m.write(start, v)), 1.5f)
+                }
+            }
+        }
+        // Scaling keeps the balance between the settings a slider moves.
+        val p = Macros.ROBOTIC.write(VoiceParams.defaults(), 30f) // defaults: ring 10, comb 15, crush 15
+        assertEquals(20f, p[Specs.RING_MIX], 1f)
+        assertEquals(30f, p[Specs.COMB_MIX], 1f)
     }
 
     @Test
@@ -63,31 +80,6 @@ class ModelTest {
         assertEquals("A4", Scales.noteName(69))
         assertEquals("C♯3", Scales.noteName(49))
         assertEquals(0b000100000001, Scales.mask(Scales.CUSTOM, 5, 0b000100000001))
-    }
-
-    @Test
-    fun tunerSnapsHoldsAndSmooths() {
-        // (hysteresis only engages after the first few settled frames of a phrase)
-        val t = Tuner(0.0029)
-        t.retuneMs = 0.0
-        assertEquals(60.0, t.update(60.3, true), 1e-9)
-        repeat(5) { t.update(60.3, true) } // let the pitch settle: hysteresis starts after the first few frames
-        // Hysteresis keeps the note until the pitch is clearly nearer the next one.
-        t.holdSemitones = 0.25
-        assertEquals(60.0, t.update(60.6, true), 1e-9)
-        assertEquals(61.0, t.update(60.9, true), 1e-9)
-        // A wrong first guess at the start of a phrase is not held.
-        t.reset(); t.strength = 1.0
-        assertEquals(60.0, t.update(60.4, true), 1e-9)
-        assertEquals(61.0, t.update(60.55, true), 1e-9)
-        // Strength blends toward the target.
-        t.reset(); t.strength = 0.5
-        assertEquals(60.15, t.update(60.3, true), 1e-9)
-        // Slow retune moves gradually after the first voiced frame.
-        t.reset(); t.strength = 1.0; t.retuneMs = 200.0
-        t.update(60.4, true)
-        val y = t.update(60.4 + 0.5, true) // pitch jumps up: correction needs time to follow
-        assertNotEquals(61.0, y, 1e-6)
     }
 
     @Test

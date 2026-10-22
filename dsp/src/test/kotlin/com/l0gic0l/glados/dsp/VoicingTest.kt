@@ -90,29 +90,4 @@ class VoicingTest {
         println("noisy phrase: $notes notes for 3 syllables")
         assertTrue("expected about 3 notes, got $notes", notes in 3..6)
     }
-
-    @Test
-    fun liveEngineHearsVoiceThroughRumbleAndHiss() {
-        val sig = withNoise(withRumble(phrase(), 2.0), 12.0)
-        val e = LivePitchEngine(sr, VoiceParams.defaults())
-        val bi = FloatArray(128)
-        val bo = FloatArray(128)
-        var voiced = 0
-        var frames = 0
-        var i = 0
-        while (i + 128 <= sig.size) {
-            System.arraycopy(sig, i, bi, 0, 128)
-            e.process(bi, bo, 128)
-            // Count only the stretches where a syllable is sounding.
-            val t = i.toDouble() / sr
-            val inSyllable = (0..2).any { t in (0.2 + it * 1.1 + 0.15)..(0.2 + it * 1.1 + 0.55) }
-            if (inSyllable) {
-                frames++
-                if (e.inputHz > 0) voiced++
-            }
-            i += 128
-        }
-        println("live: $voiced of $frames frames inside syllables were detected as voice")
-        assertTrue("live engine detected only $voiced of $frames voiced frames", voiced >= frames * 0.75)
-    }
 }

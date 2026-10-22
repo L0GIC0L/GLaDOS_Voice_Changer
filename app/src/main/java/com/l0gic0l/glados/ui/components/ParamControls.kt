@@ -15,8 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.l0gic0l.glados.dsp.Scales
+import com.l0gic0l.glados.model.Macro
 import com.l0gic0l.glados.model.ParamSpec
 import com.l0gic0l.glados.model.VoiceParams
 
@@ -69,6 +71,25 @@ fun ParamControl(
             )
             HelpText(spec)
         }
+    }
+}
+
+/** A Simple-mode slider that moves several settings at once. */
+@Composable
+fun MacroControl(macro: Macro, params: VoiceParams, onChange: (Float) -> Unit, modifier: Modifier = Modifier) {
+    val value = macro.read(params).coerceIn(0f, 100f)
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(macro.label, style = MaterialTheme.typography.bodyLarge)
+            Text("%.0f %%".format(value), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(value = value, onValueChange = onChange, valueRange = 0f..100f, modifier = Modifier.testTag("macro-${macro.id}"))
+        Text(
+            macro.help,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
     }
 }
 

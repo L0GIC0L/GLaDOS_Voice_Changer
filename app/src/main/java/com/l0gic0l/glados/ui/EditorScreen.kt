@@ -150,6 +150,7 @@ fun EditorScreen(vm: MainViewModel, goSpeak: () -> Unit) {
             PianoRoll(vm, controls, Modifier.fillMaxSize())
         }
 
+        PresetPicker(vm)
         SelectedNotes(vm, params)
         CorrectionCard(vm)
         DetectionCard(vm, params)
@@ -239,7 +240,7 @@ private fun CorrectionCard(vm: MainViewModel) {
             LabeledSlider("Remove modulation", mod, 0f..100f, "%.0f %%") { mod = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 Button(onClick = { vm.applyCorrection(center / 100.0, drift / 100.0, mod / 100.0) }) { Text("Apply") }
-                FilledTonalButton(onClick = vm::matchLiveSettings) { Text("Match live settings") }
+                FilledTonalButton(onClick = vm::applyVoiceTuning) { Text("Use Voice tab tuning") }
                 OutlinedButton(onClick = vm::resetNotes) { Text("Reset notes") }
                 OutlinedButton(onClick = vm::resetTiming) { Text("Reset timing") }
             }

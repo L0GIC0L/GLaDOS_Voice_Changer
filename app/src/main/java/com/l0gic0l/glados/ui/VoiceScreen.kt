@@ -7,91 +7,97 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.l0gic0l.glados.MainViewModel
 import com.l0gic0l.glados.dsp.Scales
 import com.l0gic0l.glados.model.Group
-import com.l0gic0l.glados.model.Presets
+import com.l0gic0l.glados.model.Macros
 import com.l0gic0l.glados.model.Specs
 import com.l0gic0l.glados.ui.components.CustomScaleChips
+import com.l0gic0l.glados.ui.components.MacroControl
 import com.l0gic0l.glados.ui.components.ParamControl
 import kotlin.math.roundToInt
 
-/** Every setting in the app, grouped, with presets on top. */
+/** Presets on top, then either a few combined sliders (Simple) or every setting, grouped (Advanced). */
 @Composable
 fun VoiceScreen(vm: MainViewModel) {
     val params by vm.params.collectAsStateWithLifecycle()
+    val simple by vm.simpleMode.collectAsStateWithLifecycle()
 
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Presets", style = MaterialTheme.typography.titleMedium)
-        PresetChips(vm)
-        Text(
-            "Double-tap a slider's name to reset it. Settings are saved automatically.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        PresetPicker(vm)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = simple,
+                onClick = { vm.setSimpleMode(true) },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+                modifier = Modifier.testTag("mode-simple"),
+            ) { Text("Simple") }
+            SegmentedButton(
+                selected = !simple,
+                onClick = { vm.setSimpleMode(false) },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+                modifier = Modifier.testTag("mode-advanced"),
+            ) { Text("Advanced") }
+        }
 
-        for (group in Group.entries) {
-            GroupCard(group, vm, params)
+        if (simple) {
+            SimpleCard(vm, params)
+        } else {
+            Text(
+                "Double-tap a slider's name to reset it. Settings are saved automatically.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            for (group in Group.entries) {
+                GroupCard(group, vm, params)
+            }
         }
     }
 }
 
-/** Built-in and saved presets as a row of chips, plus a button to save the current settings. */
 @Composable
-fun PresetChips(vm: MainViewModel, modifier: Modifier = Modifier) {
-    val userPresets by vm.userPresets.collectAsStateWithLifecycle()
-    var saving by remember { mutableStateOf(false) }
-    LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(Presets.all) { p ->
-            FilterChip(selected = false, onClick = { vm.applyPreset(p.name) }, label = { Text(p.name) })
-        }
-        items(userPresets.keys.toList()) { name ->
-            InputChip(
-                selected = false,
-                onClick = { vm.applyPreset(name) },
-                label = { Text(name) },
-                trailingIcon = {
-                    Icon(
-                        Icons.Filled.Close, contentDescription = "Delete preset $name",
-                        modifier = Modifier.clickable { vm.deleteUserPreset(name) }.padding(2.dp),
-                    )
-                },
+private fun SimpleCard(vm: MainViewModel, params: com.l0gic0l.glados.model.VoiceParams) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Quick controls", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Pick a preset, then season it here. Most sliders move several settings at once; Advanced shows them all.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
             )
+            ParamControl(Specs.SHIFT, params, vm::setParam)
+            ParamControl(Specs.FORMANT, params, vm::setParam)
+            for (m in Macros.all) MacroControl(m, params, onChange = { vm.setMacro(m, it) })
+            ParamControl(Specs.OUT_DB, params, vm::setParam)
         }
-        item { AssistChip(onClick = { saving = true }, label = { Text("Save current...") }) }
     }
-    if (saving) SavePresetDialog(onDismiss = { saving = false }, onSave = { vm.saveUserPreset(it); saving = false })
 }
 
 @Composable
@@ -125,18 +131,4 @@ private fun GroupCard(group: Group, vm: MainViewModel, params: com.l0gic0l.glado
             }
         }
     }
-}
-
-@Composable
-private fun SavePresetDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Save preset") },
-        text = {
-            OutlinedTextField(value = name, onValueChange = { name = it.take(32) }, label = { Text("Name") }, singleLine = true)
-        },
-        confirmButton = { TextButton(onClick = { onSave(name) }, enabled = name.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

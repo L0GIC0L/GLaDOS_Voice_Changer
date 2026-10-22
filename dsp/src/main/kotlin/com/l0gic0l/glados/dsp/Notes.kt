@@ -314,8 +314,8 @@ object NoteOps {
         }
     }
 
-    /** Applies the live Tuning settings to every note, so speech from TTS matches the live voice. */
-    fun correctLikeLive(notes: Collection<Note>, p: VoiceParams, globalShift: Double) {
+    /** Applies the Tuning settings from the Voice tab (key, scale, strength, retune speed, monotone) to [notes]. */
+    fun correctToSettings(notes: Collection<Note>, p: VoiceParams, globalShift: Double) {
         val strength = p[Specs.STRENGTH] / 100.0
         val smoothing = (p[Specs.RETUNE] / 300.0).coerceIn(0.0, 1.0)
         val flatten = strength * (1.0 - smoothing)
@@ -323,7 +323,7 @@ object NoteOps {
         correct(notes, mask, strength, flatten, flatten, globalShift, p.bool(Specs.MONOTONE), p.int(Specs.MONO_NOTE))
     }
 
-    /** Global shift in semitones that the live engine would apply: manual shift plus register matching. */
+    /** Global shift in semitones: manual shift plus register matching. */
     fun globalShift(an: Analysis, p: VoiceParams): Double {
         var shift = p[Specs.SHIFT].toDouble()
         if (p.bool(Specs.AUTO_REG)) {
@@ -333,7 +333,7 @@ object NoteOps {
         return shift
     }
 
-    /** Formant shift in semitones the live engine would apply: the setting plus its share of the pitch shift. */
+    /** Global formant shift in semitones: the setting plus its share of the pitch shift. */
     fun formantShift(p: VoiceParams, globalShift: Double): Double =
         (p[Specs.FORMANT] + p[Specs.FORMANT_FOLLOW] / 100.0 * globalShift).coerceIn(-12.0, 12.0)
 }

@@ -73,7 +73,7 @@ class FxChainTest {
     @Test
     fun limiterHoldsLoudInput() {
         val loud = FloatArray(sr) { (5.0 * kotlin.math.sin(2 * Math.PI * 220.0 * it / sr)).toFloat() }
-        val p = Presets.all[4].apply() // Natural: no effects
+        val p = Presets.all.first { it.name == "Natural" }.apply() // no effects
         val y = process(loud, p)
         var peak = 0f
         for (v in y) peak = maxOf(peak, abs(v))
@@ -161,6 +161,30 @@ class FxChainTest {
         println("glitched blocks $changedBlocks of ${x.size / 4800}")
         assertTrue("glitch never fired", changedBlocks > 3)
         assertTrue("glitch fired constantly", changedBlocks < x.size / 4800)
+    }
+
+    @Test
+    fun everyGlitchKindChangesVoiceButLeavesSilenceSilent() {
+        val x = FloatArray(sr * 10) { (0.3 * kotlin.math.sin(2 * Math.PI * 200.0 * it / sr)).toFloat() * (1f + 0.5f * kotlin.math.sin(it * 0.0005f)) }
+        val base = Presets.all.first { it.name == "Natural" }.apply()
+        val clean = process(x, base)
+        for (spec in listOf(Specs.GLITCH, Specs.GLITCH_REVERSE, Specs.GLITCH_TAPE, Specs.GLITCH_PITCH, Specs.GLITCH_DROP, Specs.GLITCH_STATIC, Specs.BUZZ)) {
+            val p = base.with(spec, 100f)
+            val y = process(x, p)
+            var changedBlocks = 0
+            var i = 0
+            while (i + 4800 < x.size) {
+                var d = 0.0
+                for (k in i until i + 4800) d += abs(y[k] - clean[k]).toDouble()
+                if (d / 4800 > 0.01) changedBlocks++
+                i += 4800
+            }
+            println("${spec.id}: changed $changedBlocks of ${x.size / 4800} blocks")
+            assertTrue("${spec.id} never changed anything", changedBlocks > 2)
+            assertFiniteAndBounded(y, spec.id)
+            val quiet = process(FloatArray(sr * 2), p)
+            assertTrue("${spec.id} made sound out of silence", quiet.all { it == 0f })
+        }
     }
 
     @Test

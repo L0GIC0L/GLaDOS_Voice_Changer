@@ -47,6 +47,13 @@ class ClipState(val audio: Audio, val analysis: Analysis, val title: String, val
 
 private data class RenderKey(
     val shift: Float, val formant: Float, val follow: Float, val autoReg: Boolean, val regHz: Float, val breath: Float, val a4: Float,
+    val vibDepth: Float, val vibRate: Float, val dry: Float,
+)
+
+/** Settings that decide where each note is pulled to. */
+private data class TuningKey(
+    val key: Int, val scale: Int, val mask: Float, val retune: Float, val strength: Float, val monotone: Boolean, val monoNote: Int,
+    val shift: Float, val autoReg: Boolean, val regHz: Float,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -54,7 +61,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val params = container.params
     val userPresets = container.userPresets
     val theme = container.theme
-    val live = container.live
+    val simpleMode = container.simpleMode
     val player = container.player
     val recorder = container.recorder
     val tts = container.tts
@@ -104,14 +111,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 RenderKey(
                     it[Specs.SHIFT], it[Specs.FORMANT], it[Specs.FORMANT_FOLLOW], it.bool(Specs.AUTO_REG),
                     it[Specs.REG_HZ], it[Specs.BREATH], it[Specs.REF_A4],
+                    it[Specs.VIB_DEPTH], it[Specs.VIB_RATE], it[Specs.DRY],
                 )
             }.distinctUntilChanged().drop(1).collect { scheduleRender(80) }
+        }
+        viewModelScope.launch {
+            params.map {
+                TuningKey(
+                    it.int(Specs.KEY), it.int(Specs.SCALE), it[Specs.CUSTOM_MASK], it[Specs.RETUNE], it[Specs.STRENGTH],
+                    it.bool(Specs.MONOTONE), it.int(Specs.MONO_NOTE), it[Specs.SHIFT], it.bool(Specs.AUTO_REG), it[Specs.REG_HZ],
+                )
+            }.distinctUntilChanged().drop(1).collect { onTuningChanged() }
         }
         // Voice-range and voicing settings change what counts as a note, so the clip has to be analysed again.
         viewModelScope.launch {
             params.map { Triple(it[Specs.VOICING], it[Specs.FMIN], it[Specs.FMAX]) }
                 .distinctUntilChanged().drop(1).collect { onDetectionSettingsChanged() }
         }
+    }
+
+    /** A new preset or Tuning setting re-tunes the clip, as long as its notes have not been edited by hand. */
+    private fun onTuningChanged() {
+        val cs = clip ?: return
+        if (!cs.autoCorrect || undoStack.isNotEmpty()) return
+        val p = params.value
+        modify { e, a -> NoteOps.correctToSettings(e.notes, p, NoteOps.globalShift(a, p)) }
     }
 
     private fun onDetectionSettingsChanged() {
@@ -149,6 +173,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun deleteUserPreset(name: String) = container.deleteUserPreset(name)
+
+    /** Name of the built-in or saved preset that exactly matches [p], or null once anything has been changed. */
+    fun presetName(p: VoiceParams): String? =
+        Presets.matching(p)?.name ?: userPresets.value.entries.firstOrNull { VoiceParams.fromMap(it.value) == p }?.key
+
+    fun setSimpleMode(on: Boolean) = container.setSimpleMode(on)
+    fun setMacro(m: com.l0gic0l.glados.model.Macro, value: Float) = container.update { m.write(it, value) }
     fun setTheme(t: com.l0gic0l.glados.data.ThemeSettings) = container.setTheme(t)
 
     // ---- selection and undo ----
@@ -230,9 +261,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         NoteOps.correct(targets(e), mask, center, drift, mod, shift, p.bool(Specs.MONOTONE), p.int(Specs.MONO_NOTE))
     }
 
-    fun matchLiveSettings() = mutate { e, a ->
+    fun applyVoiceTuning() = mutate { e, a ->
         val p = params.value
-        NoteOps.correctLikeLive(targets(e), p, NoteOps.globalShift(a, p))
+        NoteOps.correctToSettings(targets(e), p, NoteOps.globalShift(a, p))
     }
 
     fun resetNotes() = mutate { e, _ ->
@@ -302,7 +333,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Analyses [audio], splits it into notes and makes it the editor clip. A newer call cancels an older one that is
      * still running, so two overlapping loads can never interleave their results.
-     * @param autoCorrect apply the live Tuning settings to every note, so speech matches the live voice
+     * @param autoCorrect apply the Tuning settings to every note now, and again whenever they change until a note is edited
      */
     fun loadAudio(audio: Audio, title: String, autoCorrect: Boolean, autoplay: Boolean) {
         loadJob?.cancel()
@@ -321,7 +352,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val e = withContext(Dispatchers.Default) {
                     NoteOps.segment(an, segTolerance.toDouble(), segSensitivity / 100.0).also {
-                        if (autoCorrect) NoteOps.correctLikeLive(it.notes, p, NoteOps.globalShift(an, p))
+                        if (autoCorrect) NoteOps.correctToSettings(it.notes, p, NoteOps.globalShift(an, p))
                     }
                 }
                 val out = withContext(Dispatchers.Default) { renderClip(audio, an, e, params.value) { !isActive } }
@@ -354,7 +385,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, cancelled: () -> Boolean): FloatArray {
         val shift = NoteOps.globalShift(an, p)
-        val settings = RenderSettings(shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f)
+        val settings = RenderSettings(
+            shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f,
+            p[Specs.VIB_DEPTH].toDouble(), p[Specs.VIB_RATE].toDouble(), p[Specs.DRY] / 100f,
+        )
         return OfflineRenderer.render(audio.samples, an, e, settings, cancelled)
     }
 

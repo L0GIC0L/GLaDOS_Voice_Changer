@@ -5,7 +5,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 
-/** Windowed-grain overlap-add shared by the live and offline PSOLA engines. */
+/** Windowed-grain overlap-add used by the PSOLA renderer. */
 object Grain {
     /**
      * Lower bound for the window-sum divisor. Dividing by the raw sum would turn the faint tails of

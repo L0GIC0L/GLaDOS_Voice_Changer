@@ -166,22 +166,47 @@ private class BitCrusher(sr: Int) {
     }
 }
 
-/** Random stutter: now and then repeats the last few tens of milliseconds a couple of times. */
-private class Glitch(private val sr: Int) {
-    private val ring = FloatArray(sr / 2)
-    private val loop = FloatArray(sr / 4)
+/** Soft-clipping overdrive. Scaled so a typical speech peak keeps roughly its level as the drive goes up. */
+private class Drive {
+    private var gain = 1f
+    private var makeUp = 1f
+
+    fun set(amount: Float) {
+        gain = 1f + 25f * amount
+        makeUp = 0.3f / tanh(0.3f * gain)
+    }
+
+    fun process(x: Float): Float = tanh(gain * x) * makeUp
+}
+
+/**
+ * Random malfunctions: stutter, reverse, tape stop, pitch jumps, dropouts and static. At most one runs at a time,
+ * and a new one only starts while there is voice, so silence stays silent.
+ */
+private class Glitches(private val sr: Int) {
+    enum class Kind { STUTTER, REVERSE, TAPE, PITCH, DROP, STATIC }
+
+    /** Events per second for each [Kind], set by the chain. */
+    val rates = FloatArray(Kind.entries.size)
+    var stutterLen = 3000
+    var jumpRatio = 2.0
+
+    private val ring = FloatArray(sr)
+    private val loop = FloatArray(sr / 2)
     private var w = 0
-    private var loopLen = 0
+    private var kind: Kind? = null
+    private var len = 0
     private var pos = 0
-    private var repeatsLeft = 0
-    private var firstLoop = false
+    private var fadeLen = 1
+    private var loopLen = 0
+    private var delay = 0.0
     private var level = 0f
     private var rng = 0x2545F491
     private val fade = max(8, sr / 1000)
 
     fun clear() {
         ring.fill(0f)
-        repeatsLeft = 0
+        kind = null
     }
 
     private fun rand01(): Float {
@@ -191,36 +216,125 @@ private class Glitch(private val sr: Int) {
         return (rng ushr 8) / 16777216f
     }
 
-    fun process(x: Float, eventsPerSecond: Float, lengthSamples: Int): Float {
+    private fun ms(lo: Int, hi: Int) = ((lo + rand01() * (hi - lo)) * 0.001f * sr).roundToInt()
+
+    /** Sample written [d] samples ago, where 1 is the most recent. */
+    private fun ringAt(d: Double): Float {
+        val p = w - d
+        val i = floor(p).toInt()
+        val f = (p - i).toFloat()
+        val a = ring[Math.floorMod(i, ring.size)]
+        val b = ring[Math.floorMod(i + 1, ring.size)]
+        return a + (b - a) * f
+    }
+
+    private fun capture(n: Int) {
+        loopLen = n.coerceIn(fade * 2, loop.size)
+        for (i in 0 until loopLen) loop[i] = ring[Math.floorMod(w - loopLen + i, ring.size)]
+    }
+
+    private fun start(k: Kind) {
+        fadeLen = fade
+        when (k) {
+            Kind.STUTTER -> {
+                capture(stutterLen)
+                len = loopLen * (2 + (rand01() * 3).toInt())
+            }
+            Kind.REVERSE -> {
+                capture(ms(150, 400))
+                len = loopLen
+                fadeLen = fade * 4
+            }
+            Kind.TAPE -> {
+                len = ms(250, 600)
+                delay = 1.0
+                fadeLen = fade * 10
+            }
+            Kind.PITCH -> {
+                val r = jumpRatio
+                if (abs(r - 1.0) < 0.01) return
+                // Read from far enough back that a speed-up arrives at the present just as the jump ends.
+                len = min(ms(80, 250), ((ring.size - 8) / abs(r - 1.0)).toInt())
+                delay = if (r > 1.0) 1.0 + len * (r - 1.0) else 1.0
+                fadeLen = fade * 3
+            }
+            Kind.DROP -> {
+                len = ms(25, 150)
+                fadeLen = fade * 3
+            }
+            Kind.STATIC -> {
+                len = ms(60, 300)
+                fadeLen = fade * 5
+            }
+        }
+        pos = 0
+        kind = k
+    }
+
+    fun process(x: Float): Float {
         ring[w] = x
         w = if (w + 1 == ring.size) 0 else w + 1
         level += (abs(x) - level) * 0.001f
-        if (repeatsLeft == 0) {
-            if (eventsPerSecond > 0f && level > 0.004f && rand01() < eventsPerSecond / sr) {
-                loopLen = lengthSamples.coerceIn(fade * 2, loop.size)
-                for (i in 0 until loopLen) loop[i] = ring[Math.floorMod(w - loopLen + i, ring.size)]
-                pos = 0
-                repeatsLeft = 2 + (rand01() * 3).toInt()
-                firstLoop = true
+        val k = kind
+        if (k == null) {
+            if (level > 0.004f) {
+                var total = 0f
+                for (r in rates) total += r
+                if (total > 0f && rand01() < total / sr) {
+                    // Pick which kind in proportion to its rate.
+                    var pick = rand01() * total
+                    for (kk in Kind.entries) {
+                        pick -= rates[kk.ordinal]
+                        if (pick <= 0f && rates[kk.ordinal] > 0f) { start(kk); break }
+                    }
+                }
             }
             return x
         }
-        var y = loop[pos]
-        // Crossfade in at the very start and out at the end of the last repeat.
-        if (firstLoop && pos < fade) {
-            val t = pos.toFloat() / fade
-            y = y * t + x * (1f - t)
+        val y = when (k) {
+            Kind.STUTTER -> loop[pos % loopLen]
+            Kind.REVERSE -> loop[loopLen - 1 - pos]
+            Kind.TAPE -> {
+                // Slows from full speed to a stop, getting quieter and duller as it goes.
+                val speed = 1.0 - pos.toDouble() / len
+                delay = min(delay + 1.0 - speed, ring.size - 4.0)
+                ringAt(delay) * min(1f, speed.toFloat() * 3f)
+            }
+            Kind.PITCH -> {
+                delay = (delay + 1.0 - jumpRatio).coerceIn(1.0, ring.size - 4.0)
+                ringAt(delay)
+            }
+            Kind.DROP -> 0f
+            Kind.STATIC -> {
+                val n = rand01() * 2f - 1f
+                val crackle = if (rand01() < 0.003f) (rand01() * 2f - 1f) * 0.8f else 0f
+                x * 0.5f + n * min(0.25f, level * 6f + 0.05f) + crackle
+            }
         }
-        if (repeatsLeft == 1 && pos >= loopLen - fade) {
-            val t = (loopLen - pos).toFloat() / fade
-            y = y * t + x * (1f - t)
-        }
-        if (++pos >= loopLen) {
-            pos = 0
-            firstLoop = false
-            repeatsLeft--
-        }
-        return y
+        // Crossfade from the dry signal into the event and back out again.
+        val edge = min(pos, len - 1 - pos)
+        val g = if (edge < fadeLen) edge.toFloat() / fadeLen else 1f
+        if (++pos >= len) kind = null
+        return x + (y - x) * g
+    }
+}
+
+/** A mains-style hum that swells with the voice, like a grounding fault in a speaker. */
+private class Buzz(private val sr: Int) {
+    private var phase = 0.0
+    private var env = 0f
+    private var lp = 0f
+    private val attack = (1.0 - exp(-1.0 / (0.005 * sr))).toFloat()
+    private val release = (1.0 - exp(-1.0 / (0.08 * sr))).toFloat()
+
+    fun process(x: Float, amount: Float, hz: Float): Float {
+        val a = abs(x)
+        env += (a - env) * (if (a > env) attack else release)
+        phase += hz / sr
+        if (phase >= 1.0) phase -= 1.0
+        // A softened sawtooth: rich in harmonics like real hum, without the harshest aliasing.
+        lp += ((2.0 * phase - 1.0).toFloat() - lp) * 0.2f
+        return x + lp * min(1f, env * 5f) * amount * 0.35f
     }
 }
 
@@ -310,14 +424,16 @@ private class Limiter(sr: Int) {
 }
 
 /**
- * The GLaDOS effect chain, applied to a mono stream: ring mod, metal comb, bit crush, glitch,
+ * The GLaDOS effect chain, applied to a mono stream: ring mod, distortion, metal comb, bit crush, glitches, buzz,
  * EQ, echo, reverb, output gain and a safety limiter. One instance per stream.
  * [configure] and [process] must be called from the same thread.
  */
 class FxChain(private val sampleRate: Int) {
     private val comb = ModComb(sampleRate)
     private val crusher = BitCrusher(sampleRate)
-    private val glitch = Glitch(sampleRate)
+    private val drive = Drive()
+    private val glitches = Glitches(sampleRate)
+    private val buzz = Buzz(sampleRate)
     private val echo = Echo(sampleRate)
     private val reverb = Reverb(sampleRate)
     private val limiter = Limiter(sampleRate)
@@ -341,8 +457,8 @@ class FxChain(private val sampleRate: Int) {
     private var crushMix = 0f
     private var crushBits = 10
     private var crushHold = 3
-    private var glitchRate = 0f
-    private var glitchLen = 3000
+    private var buzzAmount = 0f
+    private var buzzHz = 100f
     private var echoMix = 0f
     private var echoMs = 220f
     private var echoFb = 0.35f
@@ -351,9 +467,11 @@ class FxChain(private val sampleRate: Int) {
     private var reverbDamp = 0.5f
     private var outGain = 1f
 
+    private var driveOn = false
     private var combOn = false
     private var crushOn = false
     private var glitchOn = false
+    private var buzzOn = false
     private var echoOn = false
     private var reverbOn = false
 
@@ -368,8 +486,18 @@ class FxChain(private val sampleRate: Int) {
         crushMix = p[Specs.CRUSH_MIX] / 100f
         crushBits = p.int(Specs.CRUSH_BITS)
         crushHold = p.int(Specs.CRUSH_HOLD)
-        glitchRate = p[Specs.GLITCH] / 100f * 2.5f
-        glitchLen = (p[Specs.GLITCH_MS] * 0.001f * sampleRate).roundToInt()
+        val rates = glitches.rates
+        rates[Glitches.Kind.STUTTER.ordinal] = p[Specs.GLITCH] / 100f * 2.5f
+        rates[Glitches.Kind.REVERSE.ordinal] = p[Specs.GLITCH_REVERSE] / 100f * 1.2f
+        rates[Glitches.Kind.TAPE.ordinal] = p[Specs.GLITCH_TAPE] / 100f * 0.8f
+        rates[Glitches.Kind.PITCH.ordinal] = p[Specs.GLITCH_PITCH] / 100f * 2f
+        rates[Glitches.Kind.DROP.ordinal] = p[Specs.GLITCH_DROP] / 100f * 3f
+        rates[Glitches.Kind.STATIC.ordinal] = p[Specs.GLITCH_STATIC] / 100f * 2f
+        glitches.stutterLen = (p[Specs.GLITCH_MS] * 0.001f * sampleRate).roundToInt()
+        glitches.jumpRatio = 2.0.pow(p[Specs.GLITCH_JUMP] / 12.0)
+        drive.set(p[Specs.DRIVE] / 100f)
+        buzzAmount = p[Specs.BUZZ] / 100f
+        buzzHz = p[Specs.BUZZ_HZ]
         echoMix = p[Specs.ECHO_MIX] / 100f
         echoMs = p[Specs.ECHO_MS]
         echoFb = p[Specs.ECHO_FB] / 100f
@@ -378,13 +506,15 @@ class FxChain(private val sampleRate: Int) {
         reverbDamp = p[Specs.REVERB_DAMP] / 100f
         outGain = 10f.pow(p[Specs.OUT_DB] / 20f)
 
+        driveOn = p[Specs.DRIVE] > 0.5f
         combOn = combMix > 0.001f
         crushOn = crushMix > 0.001f
-        glitchOn = glitchRate > 0f
+        glitchOn = rates.any { it > 0f }
+        buzzOn = buzzAmount > 0.001f
         echoOn = echoMix > 0.001f
         reverbOn = reverbMix > 0.001f
         if (!combOn) comb.clear()
-        if (!glitchOn) glitch.clear()
+        if (!glitchOn) glitches.clear()
         if (!echoOn) echo.clear()
         if (!reverbOn) reverb.clear()
 
@@ -396,7 +526,7 @@ class FxChain(private val sampleRate: Int) {
     }
 
     fun reset() {
-        comb.clear(); glitch.clear(); echo.clear(); reverb.clear()
+        comb.clear(); glitches.clear(); echo.clear(); reverb.clear()
         hpf.reset(); lowShelf.reset(); presence.reset(); highShelf.reset(); lpf.reset()
     }
 
@@ -412,9 +542,11 @@ class FxChain(private val sampleRate: Int) {
                 if (ringPhase > 2 * PI) ringPhase -= 2 * PI
                 x = x * (1f - rm) + x * sin(ringPhase).toFloat() * rm
             }
+            if (driveOn) x = drive.process(x)
             if (combOn) x = comb.process(x, combMix, combMs, combFb, combDepth, combRate)
             if (crushOn) x = crusher.process(x, crushMix, crushBits, crushHold)
-            if (glitchOn) x = glitch.process(x, glitchRate, glitchLen)
+            if (glitchOn) x = glitches.process(x)
+            if (buzzOn) x = buzz.process(x, buzzAmount, buzzHz)
 
             x = hpf.process(x)
             x = lowShelf.process(x)

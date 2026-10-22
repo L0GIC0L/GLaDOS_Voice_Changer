@@ -222,6 +222,27 @@ class OfflineTest {
     }
 
     @Test
+    fun fullDryBlendReturnsTheOriginal() {
+        val (x, _) = phrase()
+        val an = analyse(x)
+        val y = OfflineRenderer.render(x, an, NoteOps.segment(an), RenderSettings(pitchShift = 5.0, dry = 1f))
+        for (i in x.indices) assertEquals(x[i], y[i], 1e-6f)
+    }
+
+    @Test
+    fun vibratoWobblesThePitch() {
+        val (x, spans) = phrase()
+        val an = analyse(x)
+        val y = OfflineRenderer.render(x, an, NoteOps.segment(an), RenderSettings(vibratoCents = 80.0, vibratoHz = 5.0))
+        val (a, b) = spans[0]
+        val track = TestSignals.pitchTrack(y, sr, ((a + 0.05) * sr).toInt(), ((b - 0.05) * sr).toInt()).filter { it > 0 }
+        val cents = track.map { TestSignals.cents(it, track.minOrNull()!!) }
+        val spread = cents.maxOrNull()!! - cents.minOrNull()!!
+        println("vibrato spread $spread cents")
+        assertTrue("vibrato spread $spread cents", spread > 80.0)
+    }
+
+    @Test
     fun globalShiftHelperMatchesRegister() {
         val (x, _) = phrase()
         val an = analyse(x)

@@ -2,7 +2,6 @@ package com.l0gic0l.glados
 
 import android.app.Application
 import com.l0gic0l.glados.audio.ClipPlayer
-import com.l0gic0l.glados.audio.LiveController
 import com.l0gic0l.glados.audio.Recorder
 import com.l0gic0l.glados.data.Prefs
 import com.l0gic0l.glados.data.ThemeSettings
@@ -18,7 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 
-/** Process-wide singletons shared by the UI and the live-audio service. */
+/** Process-wide singletons: settings, presets, theme and the audio helpers. */
 class AppContainer(app: Application) {
     val prefs = Prefs(app)
 
@@ -31,7 +30,9 @@ class AppContainer(app: Application) {
     private val _theme = MutableStateFlow(prefs.loadTheme())
     val theme: StateFlow<ThemeSettings> = _theme.asStateFlow()
 
-    val live = LiveController(app, params)
+    private val _simpleMode = MutableStateFlow(prefs.simpleMode)
+    val simpleMode: StateFlow<Boolean> = _simpleMode.asStateFlow()
+
     val player = ClipPlayer(params)
     val recorder = Recorder(app)
     val tts = TtsEngine(app)
@@ -61,6 +62,11 @@ class AppContainer(app: Application) {
         val next = _userPresets.value - name
         _userPresets.value = next
         prefs.saveUserPresets(next)
+    }
+
+    fun setSimpleMode(on: Boolean) {
+        _simpleMode.value = on
+        prefs.simpleMode = on
     }
 
     fun setTheme(t: ThemeSettings) {

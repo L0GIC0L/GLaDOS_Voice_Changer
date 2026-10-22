@@ -3,19 +3,24 @@ package com.l0gic0l.glados.dsp
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.PI
 import kotlin.math.pow
+import kotlin.math.sin
 
 /** Global settings applied on top of the per-note edits. */
 class RenderSettings(
     val pitchShift: Double = 0.0,
     val formantShift: Double = 0.0,
     val breath: Float = 1f,
+    val vibratoCents: Double = 0.0,
+    val vibratoHz: Double = 5.5,
+    /** 0..1 share of the original, unedited voice blended into the result. */
+    val dry: Float = 0f,
 )
 
 /**
  * Non-real-time PSOLA: rebuilds the clip from the edited notes, honouring pitch, formant, gain and
- * timing edits. Shares the grain code with [LivePitchEngine]; the difference is that marks and the
- * pitch contour come from a full-clip [Analysis], so it can look ahead and stretch time.
+ * timing edits. Marks and the pitch contour come from a full-clip [Analysis], so it can look ahead and stretch time.
  */
 object OfflineRenderer {
     private const val PAD = 8192
@@ -57,7 +62,8 @@ object OfflineRenderer {
             if (markIdx >= 0) {
                 val note = edit.notes.getOrNull(noteOfFrame[fi])
                 val inMidi = an.midiAt(frame)
-                val outMidi = (if (note != null) note.pitchAt(frame) else inMidi) + settings.pitchShift
+                val vibrato = settings.vibratoCents / 100.0 * sin(2 * PI * settings.vibratoHz * s / sr)
+                val outMidi = (if (note != null) note.pitchAt(frame) else inMidi) + settings.pitchShift + vibrato
                 val ts = sr / Pitch.midiToHz(outMidi, an.a4).coerceIn(40.0, 1600.0)
                 val rho = (baseRho * 2.0.pow((note?.formant ?: 0f) / 12.0)).coerceIn(0.4, 2.5)
                 val gain = if (note == null || note.gainDb == 0f) 1f else 10f.pow(note.gainDb / 20f)
@@ -73,7 +79,19 @@ object OfflineRenderer {
             }
         }
 
-        return FloatArray(n) { acc[it + PAD] / max(norm[it + PAD], Grain.NORM_FLOOR) }
+        val out = FloatArray(n) { acc[it + PAD] / max(norm[it + PAD], Grain.NORM_FLOOR) }
+        val d = settings.dry.coerceIn(0f, 1f)
+        if (d > 0f) {
+            // The original voice, following any timing edits so it stays in step with the tuned one.
+            for (i in 0 until n) {
+                val a = timeMap.toInput(i.toDouble()).coerceIn(0.0, (n - 1).toDouble())
+                val j = a.toInt()
+                val f = (a - j).toFloat()
+                val dryV = x[j] + (x[min(j + 1, n - 1)] - x[j]) * f
+                out[i] = out[i] * (1f - d) + dryV * d
+            }
+        }
+        return out
     }
 
     private fun nearestMark(marks: IntArray, t: Double): Int {

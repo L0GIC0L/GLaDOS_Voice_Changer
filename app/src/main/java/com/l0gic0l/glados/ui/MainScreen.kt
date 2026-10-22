@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Tune
@@ -50,7 +49,6 @@ import com.l0gic0l.glados.data.DarkMode
 import com.l0gic0l.glados.data.ThemeSettings
 
 enum class Dest(val label: String, val icon: ImageVector) {
-    LIVE("Live", Icons.Filled.Mic),
     SPEAK("Speak", Icons.Filled.RecordVoiceOver),
     EDITOR("Editor", Icons.Filled.GraphicEq),
     VOICE("Voice", Icons.Filled.Tune),
@@ -59,7 +57,7 @@ enum class Dest(val label: String, val icon: ImageVector) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: MainViewModel) {
-    var dest by rememberSaveable { mutableStateOf(Dest.LIVE) }
+    var dest by rememberSaveable { mutableStateOf(Dest.SPEAK) }
     var showTheme by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
@@ -100,7 +98,6 @@ fun MainScreen(vm: MainViewModel) {
             // Keeps each tab's remembered state (typed text, scroll position, expanded sections) while another tab is shown.
             holder.SaveableStateProvider(dest.name) {
                 when (dest) {
-                    Dest.LIVE -> LiveScreen(vm)
                     Dest.SPEAK -> TtsScreen(vm, openEditor = { dest = Dest.EDITOR })
                     Dest.EDITOR -> EditorScreen(vm, goSpeak = { dest = Dest.SPEAK })
                     Dest.VOICE -> VoiceScreen(vm)

@@ -47,6 +47,10 @@ class Prefs(context: Context) {
         }
     }
 
+    var simpleMode: Boolean
+        get() = sp.getBoolean(KEY_SIMPLE, true)
+        set(v) = sp.edit { putBoolean(KEY_SIMPLE, v) }
+
     private fun readMap(json: String?): Map<String, Float>? {
         if (json == null) return null
         return try {
@@ -62,5 +66,6 @@ class Prefs(context: Context) {
         const val KEY_PRESETS = "userPresets"
         const val KEY_DYNAMIC = "dynamicColor"
         const val KEY_DARK = "darkMode"
+        const val KEY_SIMPLE = "simpleMode"
     }
 }

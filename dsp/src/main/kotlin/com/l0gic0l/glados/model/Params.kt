@@ -8,6 +8,7 @@ enum class Group(val title: String, val blurb: String) {
     TUNING("Tuning", "Which notes the voice is pulled to, and how hard."),
     VOICE("Voice", "Register, formants and pitch detection."),
     ROBOT("Robot", "The metallic, digital character."),
+    GLITCH("Glitches", "Random malfunctions. They only fire while there is voice, so silence stays silent."),
     SPACE("Space", "Echo and the test chamber."),
     OUTPUT("EQ and output", "Final tone shaping and level."),
 }
@@ -88,7 +89,6 @@ object Specs {
         "0 snaps instantly (hard robotic steps). Higher values let natural glides through.",
     )
     val STRENGTH = slider("strength", "Strength", Group.TUNING, 0f, 100f, 100f, 1f, "%", "How far toward the target note the pitch is pulled.")
-    val HOLD = slider("holdCents", "Note hold", Group.TUNING, 0f, 100f, 25f, 1f, "cents", "Extra distance a note must be crossed before switching to the next. Stops flicker between notes.")
     val SHIFT = slider("shift", "Pitch shift", Group.TUNING, -12f, 12f, 0f, 0.1f, "st", "Transposes the voice before tuning.")
     val AUTO_REG = toggle("autoReg", "Match target register", Group.TUNING, true, "Measures your average pitch and shifts it to the target register below, so any voice lands near GLaDOS.")
     val REG_HZ = slider("regHz", "Target register", Group.TUNING, 120f, 400f, 215f, 5f, "Hz", "Average pitch the voice is moved to.")
@@ -97,7 +97,7 @@ object Specs {
         "monoNote", "Monotone note", Group.TUNING, 36f, 84f, 57f, 1f,
         formatter = { Scales.noteName(it.roundToInt()) },
     )
-    val VIB_DEPTH = slider("vibDepth", "Vibrato depth", Group.TUNING, 0f, 100f, 0f, 1f, "cents")
+    val VIB_DEPTH = slider("vibDepth", "Vibrato depth", Group.TUNING, 0f, 100f, 0f, 1f, "cents", "Adds an even, singer-style wobble to the pitch.")
     val VIB_RATE = slider("vibRate", "Vibrato rate", Group.TUNING, 0.5f, 10f, 5.5f, 0.1f, "Hz")
     val REF_A4 = slider("refA4", "Reference A4", Group.TUNING, 415f, 466f, 440f, 1f, "Hz")
 
@@ -107,14 +107,14 @@ object Specs {
         "formantFollow", "Formants follow pitch", Group.VOICE, 0f, 100f, 35f, 1f, "%",
         "Moves formants a fraction of however far the pitch is shifted, so a deep voice raised to GLaDOS pitch also gets a smaller vocal tract.",
     )
-    val FMIN = slider("fmin", "Lowest pitch", Group.VOICE, 50f, 300f, 85f, 5f, "Hz", "Lowest voice pitch to track. Lower values add latency.")
+    val FMIN = slider("fmin", "Lowest pitch", Group.VOICE, 50f, 300f, 85f, 5f, "Hz", "Lowest voice pitch to look for.")
     val FMAX = slider("fmax", "Highest pitch", Group.VOICE, 300f, 1200f, 700f, 10f, "Hz")
-    val GATE = slider("gateDb", "Noise gate", Group.VOICE, -80f, -20f, -58f, 1f, "dB", "Silences input quieter than this.")
     val VOICING = slider("voicing", "Voicing sensitivity", Group.VOICE, 0f, 100f, 60f, 1f, "%", "How readily sound counts as pitched voice. Raise it for quiet, noisy, breathy or echoey recordings; lower it if background sound is being tuned.")
     val BREATH = slider("breath", "Breath and consonants", Group.VOICE, 0f, 200f, 80f, 1f, "%", "Level of unpitched sound such as s and t.")
-    val DRY = slider("dry", "Dry voice", Group.VOICE, 0f, 100f, 0f, 1f, "%", "Blend in the unprocessed voice.")
+    val DRY = slider("dry", "Dry voice", Group.VOICE, 0f, 100f, 0f, 1f, "%", "Blends the original voice back in under the tuned one, for a doubled sound.")
 
     // ---- Robot ----
+    val DRIVE = slider("drive", "Distortion", Group.ROBOT, 0f, 100f, 0f, 1f, "%", "Overdrives the voice like a cheap speaker or megaphone.")
     val RING_MIX = slider("ringMix", "Ring mod mix", Group.ROBOT, 0f, 100f, 10f, 1f, "%")
     val RING_HZ = slider("ringHz", "Ring mod frequency", Group.ROBOT, 20f, 1000f, 85f, 1f, "Hz")
     val COMB_MIX = slider("combMix", "Metal comb mix", Group.ROBOT, 0f, 100f, 15f, 1f, "%", "Short feedback delay that gives a hollow metallic ring.")
@@ -125,8 +125,18 @@ object Specs {
     val CRUSH_MIX = slider("crushMix", "Bit crush mix", Group.ROBOT, 0f, 100f, 15f, 1f, "%")
     val CRUSH_BITS = slider("crushBits", "Bit depth", Group.ROBOT, 3f, 16f, 10f, 1f, "bit")
     val CRUSH_HOLD = slider("crushHold", "Sample hold", Group.ROBOT, 1f, 40f, 3f, 1f, "x", "Repeats each sample this many times, lowering the effective sample rate.")
-    val GLITCH = slider("glitch", "Glitch rate", Group.ROBOT, 0f, 100f, 12f, 1f, "%", "How often the sound stutters like a failing chip.")
-    val GLITCH_MS = slider("glitchMs", "Glitch length", Group.ROBOT, 15f, 250f, 70f, 1f, "ms")
+
+    // ---- Glitches ----
+    val GLITCH = slider("glitch", "Stutter", Group.GLITCH, 0f, 100f, 12f, 1f, "%", "How often the sound repeats a scrap of itself like a failing chip.")
+    val GLITCH_MS = slider("glitchMs", "Stutter length", Group.GLITCH, 15f, 250f, 70f, 1f, "ms")
+    val GLITCH_REVERSE = slider("glitchReverse", "Reverse", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Now and then plays the last moment backwards.")
+    val GLITCH_TAPE = slider("glitchTape", "Tape stop", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Slows to a halt as if the power failed, then snaps back.")
+    val GLITCH_PITCH = slider("glitchPitch", "Pitch jumps", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Short bursts shoved up or down in pitch.")
+    val GLITCH_JUMP = slider("glitchJumpSt", "Jump size", Group.GLITCH, -24f, 24f, 12f, 1f, "st", "How far a pitch jump goes. Negative values jump down.")
+    val GLITCH_DROP = slider("glitchDrop", "Dropouts", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Brief cuts to silence, like a bad connection.")
+    val GLITCH_STATIC = slider("glitchStatic", "Static bursts", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Crackles of radio static over the voice.")
+    val BUZZ = slider("buzz", "Electrical buzz", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "A mains hum that comes and goes with the voice.")
+    val BUZZ_HZ = slider("buzzHz", "Buzz pitch", Group.GLITCH, 40f, 240f, 100f, 1f, "Hz")
 
     // ---- Space ----
     val ECHO_MIX = slider("echoMix", "Echo mix", Group.SPACE, 0f, 100f, 0f, 1f, "%")
@@ -180,48 +190,3 @@ class VoiceParams private constructor(private val v: FloatArray) {
     }
 }
 
-class Preset(val name: String, val blurb: String, val overrides: Map<String, Float>) {
-    fun apply(): VoiceParams = VoiceParams.defaults().withAll(overrides)
-}
-
-object Presets {
-    /** The defaults in [Specs] are the Portal 1 voice. */
-    val all: List<Preset> = listOf(
-        Preset("Portal 1", "Stepped intonation, metallic buzz, digital grit.", emptyMap()),
-        Preset(
-            "Portal 2", "Smoother and more human, with chamber reverb.",
-            mapOf(
-                "retuneMs" to 70f, "strength" to 85f, "holdCents" to 35f, "formant" to 1f, "regHz" to 205f,
-                "ringMix" to 0f, "combMix" to 0f, "crushMix" to 0f, "glitch" to 0f,
-                "echoMix" to 6f, "echoMs" to 260f, "echoFb" to 30f,
-                "reverbMix" to 22f, "reverbSize" to 70f, "reverbDamp" to 45f,
-                "hpf" to 120f, "lpf" to 12000f, "midDb" to 2f,
-            ),
-        ),
-        Preset(
-            "PotatOS", "Low-voltage and lo-fi, a little drunk.",
-            mapOf(
-                "autoReg" to 0f, "shift" to -2f, "formant" to -1.5f, "retuneMs" to 45f,
-                "ringMix" to 0f, "combMix" to 20f, "combMs" to 5f,
-                "crushMix" to 70f, "crushBits" to 6f, "crushHold" to 8f, "glitch" to 22f,
-                "reverbMix" to 5f, "hpf" to 280f, "lpf" to 3600f, "midDb" to 4f, "midHz" to 1800f,
-            ),
-        ),
-        Preset(
-            "Hard tune", "Clean snap-to-note autotune with no effects.",
-            mapOf(
-                "autoReg" to 0f, "formant" to 0f, "retuneMs" to 0f,
-                "ringMix" to 0f, "combMix" to 0f, "crushMix" to 0f, "glitch" to 0f,
-                "reverbMix" to 0f, "hpf" to 70f, "lpf" to 18000f, "lowDb" to 0f, "midDb" to 0f,
-            ),
-        ),
-        Preset(
-            "Natural", "Barely processed. Useful as a starting point.",
-            mapOf(
-                "autoReg" to 0f, "strength" to 0f, "formant" to 0f,
-                "ringMix" to 0f, "combMix" to 0f, "crushMix" to 0f, "glitch" to 0f,
-                "reverbMix" to 0f, "hpf" to 70f, "lpf" to 18000f, "lowDb" to 0f, "midDb" to 0f,
-            ),
-        ),
-    )
-}

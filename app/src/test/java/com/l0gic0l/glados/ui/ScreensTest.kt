@@ -17,6 +17,8 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.l0gic0l.glados.GladosApp
@@ -25,8 +27,10 @@ import com.l0gic0l.glados.Tool
 import com.l0gic0l.glados.data.DarkMode
 import com.l0gic0l.glados.data.ThemeSettings
 import com.l0gic0l.glados.dsp.Audio
+import com.l0gic0l.glados.dsp.NoteOps
 import com.l0gic0l.glados.dsp.Wav
 import com.l0gic0l.glados.model.Group
+import com.l0gic0l.glados.model.PresetCategory
 import com.l0gic0l.glados.model.Specs
 import com.l0gic0l.glados.ui.editor.PianoRoll
 import com.l0gic0l.glados.ui.editor.RollControls
@@ -114,36 +118,20 @@ class ScreensTest {
         return Audio(x, sr)
     }
 
-    private fun loadClip() {
-        vm.loadAudio(speechClip(), "Test clip", autoCorrect = false, autoplay = false)
+    private fun loadClip(autoCorrect: Boolean = false) {
+        vm.loadAudio(speechClip(), "Test clip", autoCorrect = autoCorrect, autoplay = false)
         rule.waitUntil(timeoutMillis = 60_000) { vm.clip != null || (vm.busy == null && vm.message != null) }
         assertNotNull("loading failed: ${vm.message}", vm.clip)
         rule.waitUntil(timeoutMillis = 30_000) { vm.busy == null }
         rule.waitForIdle()
     }
 
-    private fun fakeTrace() {
-        // A voice gliding through a few notes, corrected to steps, as the live engine would report it.
-        for (i in 0 until 400) {
-            val inHz = 150f * Math.pow(2.0, (i / 400.0) * 7 / 12.0 + 0.04 * Math.sin(i * 0.5)).toFloat()
-            val step = Math.round(12 * Math.log(inHz / 220.0) / Math.log(2.0))
-            vm.live.trace.push(if (i in 120..160) 0f else inHz, if (i in 120..160) 0f else (220.0 * Math.pow(2.0, step / 12.0)).toFloat())
-        }
-    }
-
-    @Test
-    fun liveScreenRenders() {
-        fakeTrace()
-        showApp()
-        shot("01-live")
-        rule.onNodeWithText("Go live", useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("Quick controls").assertExists()
-    }
-
     @Test
     fun voiceScreenHasAControlForEveryParameterAndPresetsApply() {
         showApp()
         go("voice")
+        rule.onNodeWithTag("mode-advanced").performClick()
+        rule.waitForIdle()
         while (rule.onAllNodesWithContentDescription("Expand").fetchSemanticsNodes().isNotEmpty()) {
             rule.onAllNodesWithContentDescription("Expand")[0].performScrollTo().performClick()
             rule.waitForIdle()
@@ -153,16 +141,52 @@ class ScreensTest {
                 rule.onNodeWithText(spec.label, substring = false).assertExists("missing control for ${spec.id}")
             }
         }
-        shot("02-voice")
-        rule.onNodeWithText("Presets").performScrollTo()
+        shot("02-voice-advanced")
+        rule.onNodeWithTag("preset-picker").performScrollTo().performClick()
         rule.waitForIdle()
+        for (category in PresetCategory.entries) rule.onNodeWithText(category.title).assertExists()
         shot("02b-voice-presets")
         rule.onNodeWithText("Portal 2").performClick()
         rule.waitForIdle()
         assertEquals(70f, vm.params.value[Specs.RETUNE], 0f)
-        rule.onNodeWithText("Portal 1").performClick()
+        rule.onNodeWithText("Announcer").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals("Announcer", vm.presetName(vm.params.value))
+        rule.onNodeWithText("Portal 1").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(Specs.RETUNE.default, vm.params.value[Specs.RETUNE], 0f)
+        rule.onNodeWithText("Done").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Portal 1").assertExists()
+    }
+
+    @Test
+    fun simpleModeSlidersMoveSeveralSettingsAtOnce() {
+        showApp()
+        go("voice")
+        rule.onNodeWithText("Quick controls").assertExists()
+        shot("02c-voice-simple")
+        val before = vm.params.value
+        rule.onNodeWithTag("macro-robotic").performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(100f) }
+        rule.waitForIdle()
+        val after = vm.params.value
+        assertTrue("comb mix ${after[Specs.COMB_MIX]}", after[Specs.COMB_MIX] > 90f)
+        assertTrue("ring mix ${after[Specs.RING_MIX]}", after[Specs.RING_MIX] > before[Specs.RING_MIX])
+        assertTrue("crush mix ${after[Specs.CRUSH_MIX]}", after[Specs.CRUSH_MIX] > before[Specs.CRUSH_MIX])
+        assertEquals(null, vm.presetName(after))
+        rule.onNodeWithText("Custom settings").assertExists()
+    }
+
+    @Test
+    fun aNewPresetRetunesAClipUntilItIsEdited() {
+        loadClip(autoCorrect = true)
+        vm.applyPreset("Monotone")
+        val p = vm.params.value
+        val shift = NoteOps.globalShift(vm.clip!!.analysis, p)
+        for (n in vm.edit!!.notes) assertEquals(57.0, n.center + n.offset + shift, 1e-6)
+        vm.resetNotes() // a hand edit: from now on presets leave the notes alone
+        vm.applyPreset("Portal 1")
+        for (n in vm.edit!!.notes) assertEquals(0.0, n.offset, 0.0)
     }
 
     @Test
@@ -280,10 +304,9 @@ class ScreensTest {
 
     @Test
     fun lightThemeRenders() {
-        fakeTrace()
         loadClip()
         showApp(dark = false)
-        shot("09-live-light")
+        shot("09-speak-light")
         go("editor")
         vm.selectOnly(1)
         rule.waitForIdle()
@@ -308,8 +331,8 @@ class ScreensTest {
         go("speak")
         rule.onNode(hasSetTextAction()).performTextReplacement("Remember me")
         rule.waitForIdle()
-        go("live")
-        rule.onNodeWithText("Go live", useUnmergedTree = true).assertExists()
+        go("voice")
+        rule.onNodeWithTag("mode-simple").assertExists()
         go("speak")
         rule.onNodeWithText("Remember me").assertExists()
     }
