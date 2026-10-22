@@ -1,8 +1,9 @@
 //! Notes, scales and pitch conversion.
 
 pub mod pitch {
+    /// Written as ln(x) / ln(2), as the Kotlin has it: `log2` can differ in the last bit, which moves the output.
     pub fn hz_to_midi(hz: f64, a4: f64) -> f64 {
-        69.0 + 12.0 * (hz / a4).log2()
+        69.0 + 12.0 * (hz / a4).ln() / std::f64::consts::LN_2
     }
 
     pub fn midi_to_hz(midi: f64, a4: f64) -> f64 {
@@ -56,7 +57,7 @@ pub fn is_allowed(mask: i32, midi: i32) -> bool {
 /// The allowed note nearest `midi`; plain rounding if the mask allows nothing.
 pub fn nearest_allowed(midi: f64, mask: i32) -> i32 {
     if mask & CHROMATIC_MASK == 0 {
-        return midi.round() as i32;
+        return crate::kmath::round_f64(midi); // halves round up, as Java's Math.round does
     }
     let lo = midi.floor() as i32 - 6;
     let hi = midi.ceil() as i32 + 6;
