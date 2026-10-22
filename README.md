@@ -6,6 +6,8 @@ An Android app that turns a recording of your voice, or typed text, into GLaDOS 
 - **Editor**: a Melodyne-style note editor. Record, import or generate a clip and every syllable becomes a note you can drag to any pitch, stretch, retune to a scale, or change in formant and level.
 - **Voice**: a preset library, a *Simple* view with a handful of combined sliders, and an *Advanced* view with every setting (67 of them), grouped. Nothing is hidden or fixed.
 
+There is also a **Linux desktop version** (Rust, GTK4 and libadwaita) in [`linux/`](linux/README.md) with the same engine, editor, presets and settings, plus a real-time live mode.
+
 The UI is Jetpack Compose with Material 3. On Android 12+ it uses your wallpaper colors (Material You); otherwise, or if you switch it off, an Aperture-orange scheme. Light, dark and system modes are in the palette button at the top right.
 
 ## Build and run
@@ -90,6 +92,7 @@ Source layout:
 ```
 dsp/    pure Kotlin: pitch tracking, PSOLA, analysis, note editing, effects, WAV, parameters, presets, Simple-mode sliders
 app/    Android: audio I/O, text-to-speech, Compose UI, theme
+linux/  the Linux app: the same engine ported to Rust, and a GTK4/libadwaita UI
 ```
 
 All controls are generated from one parameter schema (`dsp/.../model/Params.kt`), so adding a parameter is a single entry there plus its use in the DSP. Presets are in `Presets.kt` and the Simple-mode sliders in `Macros.kt`.
@@ -105,7 +108,7 @@ Optional environment variables for deeper checks: `GLADOS_TEST_DIR` (a folder of
 
 ## Limits worth knowing
 
-- There is no real-time mode: record or import a clip, or type text, and it is processed after the fact.
+- The Android app has no real-time mode: record or import a clip, or type text, and it is processed after the fact. The Linux version has one.
 - Speech quality follows whichever text-to-speech engine and voice is installed.
 - Pitch tracking works on one voice at a time. Noise, music behind the voice, or whispering will confuse it; voicing sensitivity helps.
 - Noise reduction handles steady noise and noise that slowly gets louder or quieter. Sudden sounds (a door, a keyboard, other voices) are left in, and a sudden jump in the background (a fan switching on mid-sentence) is only partly removed.
