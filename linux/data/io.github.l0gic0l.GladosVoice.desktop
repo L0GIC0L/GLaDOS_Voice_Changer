@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=GLaDOS Voice
+Comment=Turn your voice, or typed text, into GLaDOS
+Exec=glados-voice %f
+Icon=io.github.l0gic0l.GladosVoice
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=voice;changer;autotune;pitch;tts;speech;portal;
+StartupNotify=true
+MimeType=audio/x-wav;audio/wav;audio/mpeg;audio/flac;audio/ogg;audio/x-vorbis+ogg;audio/mp4;audio/x-m4a;audio/aac;audio/webm;

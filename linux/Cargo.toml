@@ -1,0 +1,15 @@
+[workspace]
+members = ["glados-dsp", "glados-voice"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+# The DSP is far too slow unoptimised for its tests and for live audio, so even debug builds are optimised.
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
