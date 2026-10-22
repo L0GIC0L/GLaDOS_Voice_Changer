@@ -1,10 +1,10 @@
 # GLaDOS Voice Changer
 
-An Android app that turns a recording of your voice, or typed text, into GLaDOS (or one of 29 other voices). It has three tabs and one set of controls behind all of them:
+An Android app that turns a recording of your voice, or typed text, into GLaDOS (or one of 45 other voices). It has three tabs and one set of controls behind all of them:
 
 - **Speak**: type text and have it spoken by the phone's text-to-speech voice, then pitch-corrected and processed.
 - **Editor**: a Melodyne-style note editor. Record, import or generate a clip and every syllable becomes a note you can drag to any pitch, stretch, retune to a scale, or change in formant and level.
-- **Voice**: a preset library, a *Simple* view with a handful of combined sliders, and an *Advanced* view with every setting (56 of them), grouped. Nothing is hidden or fixed.
+- **Voice**: a preset library, a *Simple* view with a handful of combined sliders, and an *Advanced* view with every setting (67 of them), grouped. Nothing is hidden or fixed.
 
 The UI is Jetpack Compose with Material 3. On Android 12+ it uses your wallpaper colors (Material You); otherwise, or if you switch it off, an Aperture-orange scheme. Light, dark and system modes are in the palette button at the top right.
 
@@ -40,21 +40,23 @@ Effects are applied in real time during playback, so you can change presets or m
 
 | Category | Presets |
 |---|---|
-| GLaDOS | Portal 1, Portal 2, PotatOS, Corrupted, Waking up, Singing, Monotone |
-| Aperture Science | Announcer, Portal 2 announcer, Emergency alert, Turret, Defective turret, Personality core, Space core |
-| Robots and radios | Classic robot, Vocoder, 8-bit computer, Low battery, Radio transmission, Telephone, Megaphone, Stadium announcer |
-| Characters | Chipmunk, Giant, Movie trailer, Demon, Alien, Ghost |
-| Utility | Hard tune, Natural |
+| GLaDOS | Portal 1, Portal 2, PotatOS, Corrupted, Waking up, Singing, Monotone, Malfunctioning, Final boss |
+| Aperture Science | Announcer, Portal 2 announcer, Old Aperture tape, Turret choir, Hive mind, Emergency alert, Turret, Defective turret, Personality core, Space core |
+| Robots and radios | Classic robot, Vocoder, 8-bit computer, Low battery, Jet robot, Drunk robot, Radio transmission, Telephone, Megaphone, Stadium announcer, Old radio broadcast, Broken record, Underwater |
+| Characters | Chipmunk, Giant, Movie trailer, Demon, Alien, Ghost, Fast talker, Slow motion, Cartoon villain, Fairy, Haunted doll |
+| Utility | Hard tune, Double track, Natural |
 
 The GLaDOS presets keep your own pitch; their character comes from the tuning, formants and effects. Monotone holds the scale note nearest your own average pitch. Turret, Defective turret and Space core move the voice to a set register on purpose.
 
-**Simple mode.** Noise reduction, Pitch shift, Formant shift and Output level, plus five sliders that each move several settings at once: *Autotune* (strength and retune speed), *Robotic* (ring mod, metal comb, bit crush), *Glitches* (every glitch type), *Radio tone* (low and high cut together) and *Room* (reverb and echo). The blend sliders keep the balance the preset set, so a preset's character survives turning it up or down.
+**Simple mode.** Noise reduction, Pitch shift, Formant shift, Speed, Random speed changes, Harmony voice and Output level, plus six sliders that each move several settings at once: *Autotune* (strength and retune speed), *Robotic* (ring mod, metal comb, bit crush), *Glitches* (every glitch type), *Movement* (chorus, phaser, tremolo, tape warble), *Radio tone* (low and high cut together) and *Room* (reverb and echo). The blend sliders keep the balance the preset set, so a preset's character survives turning it up or down.
 
 **Advanced mode.** The groups are:
 - *Tuning*: key, scale including custom notes, retune speed, strength, pitch shift, register matching (off unless a preset uses it), monotone (at your own pitch or a chosen note), vibrato.
 - *Voice*: noise reduction, formants, detection range, voicing sensitivity, breath and consonants, rasp, dry blend.
+- *Speed and harmony*: speed (50 to 200%, pitch unchanged), random speed changes, and a harmony voice at any interval.
 - *Robot*: distortion, ring mod, metallic comb and flange, bit crush.
-- *Glitches*: stutter (rate and length), reverse, tape stop, pitch jumps (rate and size), dropouts, static bursts, and an electrical buzz with its own pitch.
+- *Glitches*: stutter (rate and length), reverse, tape stop, pitch jumps (rate and size), dropouts, static bursts, record crackle, and an electrical buzz with its own pitch.
+- *Movement*: chorus, phaser (with rate), tremolo (with rate), tape warble.
 - *Space*: echo and reverb.
 - *EQ and output*.
 
@@ -76,10 +78,12 @@ The DSP is plain Kotlin in the `dsp` module, with no Android dependencies, so it
 
 - **Pitch tracking**: YIN on a decimated copy of the signal, refined at full rate. The tracker listens to a band-passed copy (rumble and hiss removed) that is never heard, and keeps a note voiced through brief dips, so phone recordings work.
 - **Pitch correction**: TD-PSOLA. Short windowed grains are cut from the input at pitch marks and laid down at the spacing of the *target* pitch. That changes pitch while keeping the original vocal tract, so voices stay natural instead of chipmunking. Grains can also be stretched or squeezed to move the formants independently.
+- **Speed**: the renderer follows a speed map from the edited timeline to the output, so speed changes without changing pitch and no words are dropped. Random speed changes pick stretches of a third of a second to a second and glide them faster or slower; the map is the same every time the clip is rendered, and the editor's playhead goes through it so it stays on the notes.
+- **Harmony**: the clip is rendered a second time at the chosen interval and mixed in.
 - **Editor engine**: analyses the whole clip once, splits it into notes at pitch steps and loudness dips, and re-renders in tens of milliseconds as you edit. Retune speed controls how much of each note's own drift and wobble survives, so 0 ms gives hard robotic steps.
 - **Register matching** (optional): measures your average pitch and shifts it to a target register, moving the formants part of the way with it. Off by default; the turret and core presets use it.
 - **Noise reduction**: short-time spectra, a noise profile averaged from the clip's quietest frames, and a decision-directed Wiener gain (Ephraim and Malah), which removes steady noise without the warbling "musical noise" of plain spectral subtraction. The slider sets how far noise may be pushed down (up to 30 dB).
-- **Effects**: ring mod, rasp, distortion, modulated comb, bit crusher, glitches, buzz, EQ, echo, Freeverb reverb and a limiter, shared by playback and export. Rasp makes the level flutter irregularly at 50 to 170 Hz, the cycle-to-cycle unsteadiness of a gravelly voice, with a little breath noise. The glitches are random events that fire only while there is voice, one at a time: a stutter loops a scrap, a reverse plays the last moment backwards, a tape stop slows the audio to a halt, a pitch jump reads the recent past faster or slower, a dropout mutes, and a static burst adds crackle.
+- **Effects**: ring mod, rasp, distortion, modulated comb, bit crusher, glitches, buzz, tape warble, crackle, EQ, chorus, phaser, tremolo, echo, Freeverb reverb and a limiter, shared by playback and export. Rasp makes the level flutter irregularly at 50 to 170 Hz, the cycle-to-cycle unsteadiness of a gravelly voice, with a little breath noise. The glitches are random events that fire only while there is voice, one at a time: a stutter loops a scrap, a reverse plays the last moment backwards, a tape stop slows the audio to a halt, a pitch jump reads the recent past faster or slower, a dropout mutes, and a static burst adds crackle.
 
 Source layout:
 
