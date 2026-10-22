@@ -1,0 +1,9 @@
+[package]
+name = "glados-voice"
+description = "GLaDOS voice changer for Linux: live voice, text to speech and a note editor"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+glados-dsp = { path = "../glados-dsp" }

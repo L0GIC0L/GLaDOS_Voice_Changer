@@ -1,0 +1,8 @@
+[package]
+name = "glados-dsp"
+description = "Pitch correction, formant shifting, effects and noise reduction for the GLaDOS voice changer"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
