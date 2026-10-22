@@ -87,11 +87,12 @@ private fun SimpleCard(vm: MainViewModel, params: com.l0gic0l.glados.model.Voice
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Quick controls", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Pick a preset, then season it here. Most sliders move several settings at once; Advanced shows them all.",
+                "Pick a preset, then season it here. Most sliders move several settings at once; Advanced shows them all. Presets never change Noise reduction.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
+            ParamControl(Specs.DENOISE, params, vm::setParam)
             ParamControl(Specs.SHIFT, params, vm::setParam)
             ParamControl(Specs.FORMANT, params, vm::setParam)
             for (m in Macros.all) MacroControl(m, params, onChange = { vm.setMacro(m, it) })

@@ -12,13 +12,13 @@ import androidx.lifecycle.viewModelScope
 import com.l0gic0l.glados.audio.AudioDecoder
 import com.l0gic0l.glados.dsp.Analysis
 import com.l0gic0l.glados.dsp.Analyzer
+import com.l0gic0l.glados.dsp.Denoiser
 import com.l0gic0l.glados.dsp.Audio
 import com.l0gic0l.glados.dsp.Edit
 import com.l0gic0l.glados.dsp.FxChain
 import com.l0gic0l.glados.dsp.NoteOps
 import com.l0gic0l.glados.dsp.OfflineRenderer
 import com.l0gic0l.glados.dsp.RenderSettings
-import com.l0gic0l.glados.dsp.Scales
 import com.l0gic0l.glados.dsp.Wav
 import com.l0gic0l.glados.model.Presets
 import com.l0gic0l.glados.model.Specs
@@ -39,21 +39,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 enum class Tool { PITCH, TIME, SPLIT }
 
-class ClipState(val audio: Audio, val analysis: Analysis, val title: String, val autoCorrect: Boolean)
+/** @param noisy true for recordings and imports, which get noise reduction; generated speech is already clean */
+class ClipState(val audio: Audio, val analysis: Analysis, val title: String, val autoCorrect: Boolean, val noisy: Boolean)
+
+/** [audio] after noise reduction at [amount] percent. */
+private class Cleaned(val audio: Audio, val amount: Float, val samples: FloatArray)
 
 private data class RenderKey(
     val shift: Float, val formant: Float, val follow: Float, val autoReg: Boolean, val regHz: Float, val breath: Float, val a4: Float,
-    val vibDepth: Float, val vibRate: Float, val dry: Float,
+    val vibDepth: Float, val vibRate: Float, val dry: Float, val denoise: Float,
 )
 
 /** Settings that decide where each note is pulled to. */
 private data class TuningKey(
     val key: Int, val scale: Int, val mask: Float, val retune: Float, val strength: Float, val monotone: Boolean, val monoNote: Int,
-    val shift: Float, val autoReg: Boolean, val regHz: Float,
+    val monoAuto: Boolean, val shift: Float, val autoReg: Boolean, val regHz: Float,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -104,6 +107,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var loadJob: Job? = null
     private var dry: FloatArray? = null
 
+    @Volatile private var cleaned: Cleaned? = null
+
     init {
         tts.init()
         viewModelScope.launch {
@@ -111,7 +116,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 RenderKey(
                     it[Specs.SHIFT], it[Specs.FORMANT], it[Specs.FORMANT_FOLLOW], it.bool(Specs.AUTO_REG),
                     it[Specs.REG_HZ], it[Specs.BREATH], it[Specs.REF_A4],
-                    it[Specs.VIB_DEPTH], it[Specs.VIB_RATE], it[Specs.DRY],
+                    it[Specs.VIB_DEPTH], it[Specs.VIB_RATE], it[Specs.DRY], it[Specs.DENOISE],
                 )
             }.distinctUntilChanged().drop(1).collect { scheduleRender(80) }
         }
@@ -119,7 +124,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             params.map {
                 TuningKey(
                     it.int(Specs.KEY), it.int(Specs.SCALE), it[Specs.CUSTOM_MASK], it[Specs.RETUNE], it[Specs.STRENGTH],
-                    it.bool(Specs.MONOTONE), it.int(Specs.MONO_NOTE), it[Specs.SHIFT], it.bool(Specs.AUTO_REG), it[Specs.REG_HZ],
+                    it.bool(Specs.MONOTONE), it.int(Specs.MONO_NOTE), it.bool(Specs.MONO_AUTO), it[Specs.SHIFT], it.bool(Specs.AUTO_REG),
+                    it[Specs.REG_HZ],
                 )
             }.distinctUntilChanged().drop(1).collect { onTuningChanged() }
         }
@@ -135,7 +141,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cs = clip ?: return
         if (!cs.autoCorrect || undoStack.isNotEmpty()) return
         val p = params.value
-        modify { e, a -> NoteOps.correctToSettings(e.notes, p, NoteOps.globalShift(a, p)) }
+        modify { e, a -> NoteOps.correctToSettings(e.notes, a, p) }
     }
 
     private fun onDetectionSettingsChanged() {
@@ -145,7 +151,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             reanalyseJob?.cancel()
             reanalyseJob = viewModelScope.launch {
                 delay(500)
-                loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false)
+                loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false, noisy = cs.noisy)
             }
         } else {
             analysisStale = true
@@ -159,9 +165,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun resetParams(specs: List<com.l0gic0l.glados.model.ParamSpec>) =
         container.update { p -> specs.fold(p) { acc, s -> acc.with(s, s.default) } }
 
+    /** Applies a built-in or saved preset. Recording settings (noise reduction, pitch range, voicing) are kept. */
     fun applyPreset(name: String) {
-        Presets.all.firstOrNull { it.name == name }?.let { container.setParams(it.apply()); return }
-        userPresets.value[name]?.let { container.setParams(VoiceParams.fromMap(it)) }
+        val current = params.value
+        Presets.all.firstOrNull { it.name == name }?.let { container.setParams(it.applyTo(current)); return }
+        userPresets.value[name]?.let { container.setParams(VoiceParams.fromMap(it).withInputFrom(current)) }
     }
 
     fun saveUserPreset(name: String) {
@@ -176,7 +184,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Name of the built-in or saved preset that exactly matches [p], or null once anything has been changed. */
     fun presetName(p: VoiceParams): String? =
-        Presets.matching(p)?.name ?: userPresets.value.entries.firstOrNull { VoiceParams.fromMap(it.value) == p }?.key
+        Presets.matching(p)?.name ?: userPresets.value.entries.firstOrNull { VoiceParams.fromMap(it.value).withInputFrom(p) == p }?.key
 
     fun setSimpleMode(on: Boolean) = container.setSimpleMode(on)
     fun setMacro(m: com.l0gic0l.glados.model.Macro, value: Float) = container.update { m.write(it, value) }
@@ -257,13 +265,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun applyCorrection(center: Double, drift: Double, mod: Double) = mutate {  e, a ->
         val p = params.value
         val shift = NoteOps.globalShift(a, p)
-        val mask = Scales.mask(p.int(Specs.SCALE), p.int(Specs.KEY), p[Specs.CUSTOM_MASK].roundToInt())
-        NoteOps.correct(targets(e), mask, center, drift, mod, shift, p.bool(Specs.MONOTONE), p.int(Specs.MONO_NOTE))
+        val mask = NoteOps.scaleMask(p)
+        NoteOps.correct(targets(e), mask, center, drift, mod, shift, p.bool(Specs.MONOTONE), NoteOps.monotoneNote(a, p, shift, mask))
     }
 
     fun applyVoiceTuning() = mutate { e, a ->
         val p = params.value
-        NoteOps.correctToSettings(targets(e), p, NoteOps.globalShift(a, p))
+        NoteOps.correctToSettings(targets(e), a, p)
     }
 
     fun resetNotes() = mutate { e, _ ->
@@ -316,7 +324,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-runs pitch analysis on the current audio, for when the voice range or sensitivity settings changed. Edits are lost. */
     fun reanalyse() {
         val cs = clip ?: return
-        loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false)
+        loadAudio(cs.audio, cs.title, cs.autoCorrect, autoplay = false, noisy = cs.noisy)
     }
 
     fun resegment() {
@@ -334,8 +342,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Analyses [audio], splits it into notes and makes it the editor clip. A newer call cancels an older one that is
      * still running, so two overlapping loads can never interleave their results.
      * @param autoCorrect apply the Tuning settings to every note now, and again whenever they change until a note is edited
+     * @param noisy apply noise reduction (recordings and imports); generated speech is clean already
      */
-    fun loadAudio(audio: Audio, title: String, autoCorrect: Boolean, autoplay: Boolean) {
+    fun loadAudio(audio: Audio, title: String, autoCorrect: Boolean, autoplay: Boolean, noisy: Boolean = true) {
         loadJob?.cancel()
         renderJob?.cancel()
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -352,13 +361,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val e = withContext(Dispatchers.Default) {
                     NoteOps.segment(an, segTolerance.toDouble(), segSensitivity / 100.0).also {
-                        if (autoCorrect) NoteOps.correctToSettings(it.notes, p, NoteOps.globalShift(an, p))
+                        if (autoCorrect) NoteOps.correctToSettings(it.notes, an, p)
                     }
                 }
-                val out = withContext(Dispatchers.Default) { renderClip(audio, an, e, params.value) { !isActive } }
+                val out = withContext(Dispatchers.Default) { renderClip(audio, an, e, params.value, noisy) { !isActive } }
                 ensureActive()
                 if (e.notes.isEmpty()) message = "No pitched voice found. It will play back unchanged."
-                clip = ClipState(audio, an, title, autoCorrect)
+                clip = ClipState(audio, an, title, autoCorrect, noisy)
                 analysisStale = false
                 edit = e
                 selection = emptySet()
@@ -383,13 +392,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         job.start()
     }
 
-    private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, cancelled: () -> Boolean): FloatArray {
+    private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, noisy: Boolean, cancelled: () -> Boolean): FloatArray {
+        val source = if (noisy) clean(audio, p[Specs.DENOISE], cancelled) else audio.samples
         val shift = NoteOps.globalShift(an, p)
         val settings = RenderSettings(
             shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f,
             p[Specs.VIB_DEPTH].toDouble(), p[Specs.VIB_RATE].toDouble(), p[Specs.DRY] / 100f,
         )
-        return OfflineRenderer.render(audio.samples, an, e, settings, cancelled)
+        return OfflineRenderer.render(source, an, e, settings, cancelled)
+    }
+
+    /** Noise-reduced samples, computed once per clip and setting. Pitch analysis keeps using the original audio. */
+    private fun clean(audio: Audio, amount: Float, cancelled: () -> Boolean): FloatArray {
+        cleaned?.let { if (it.audio === audio && it.amount == amount) return it.samples }
+        val y = Denoiser.process(audio.samples, audio.sampleRate, amount / 100f, cancelled)
+        if (!cancelled()) cleaned = Cleaned(audio, amount, y)
+        return y
     }
 
     private fun scheduleRender(delayMs: Long = 40) {
@@ -399,7 +417,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         renderJob?.cancel()
         renderJob = viewModelScope.launch(Dispatchers.Default) {
             delay(delayMs)
-            val out = renderClip(cs.audio, cs.analysis, ed, p) { !isActive }
+            val out = renderClip(cs.audio, cs.analysis, ed, p, cs.noisy) { !isActive }
             // Only publish if this render is still for the clip on screen.
             if (isActive && clip === cs) {
                 dry = out
@@ -500,7 +518,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val g = 0.8f / peak
                     for (i in raw.samples.indices) raw.samples[i] *= g
                 }
-                loadAudio(raw, "Speech", autoCorrect = autoTune, autoplay = true)
+                loadAudio(raw, "Speech", autoCorrect = autoTune, autoplay = true, noisy = false)
             } catch (ex: TimeoutCancellationException) {
                 busy = null
                 message = "The speech engine did not answer in time. Try again, or pick another voice."

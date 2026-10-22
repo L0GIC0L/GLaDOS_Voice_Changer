@@ -164,11 +164,11 @@ class FxChainTest {
     }
 
     @Test
-    fun everyGlitchKindChangesVoiceButLeavesSilenceSilent() {
+    fun everyGlitchKindAndRaspChangeVoiceButLeaveSilenceSilent() {
         val x = FloatArray(sr * 10) { (0.3 * kotlin.math.sin(2 * Math.PI * 200.0 * it / sr)).toFloat() * (1f + 0.5f * kotlin.math.sin(it * 0.0005f)) }
         val base = Presets.all.first { it.name == "Natural" }.apply()
         val clean = process(x, base)
-        for (spec in listOf(Specs.GLITCH, Specs.GLITCH_REVERSE, Specs.GLITCH_TAPE, Specs.GLITCH_PITCH, Specs.GLITCH_DROP, Specs.GLITCH_STATIC, Specs.BUZZ)) {
+        for (spec in listOf(Specs.GLITCH, Specs.GLITCH_REVERSE, Specs.GLITCH_TAPE, Specs.GLITCH_PITCH, Specs.GLITCH_DROP, Specs.GLITCH_STATIC, Specs.BUZZ, Specs.RASP)) {
             val p = base.with(spec, 100f)
             val y = process(x, p)
             var changedBlocks = 0

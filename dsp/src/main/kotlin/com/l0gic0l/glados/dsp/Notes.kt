@@ -315,12 +315,21 @@ object NoteOps {
     }
 
     /** Applies the Tuning settings from the Voice tab (key, scale, strength, retune speed, monotone) to [notes]. */
-    fun correctToSettings(notes: Collection<Note>, p: VoiceParams, globalShift: Double) {
+    fun correctToSettings(notes: Collection<Note>, an: Analysis, p: VoiceParams) {
+        val shift = globalShift(an, p)
         val strength = p[Specs.STRENGTH] / 100.0
         val smoothing = (p[Specs.RETUNE] / 300.0).coerceIn(0.0, 1.0)
         val flatten = strength * (1.0 - smoothing)
-        val mask = Scales.mask(p.int(Specs.SCALE), p.int(Specs.KEY), p[Specs.CUSTOM_MASK].roundToInt())
-        correct(notes, mask, strength, flatten, flatten, globalShift, p.bool(Specs.MONOTONE), p.int(Specs.MONO_NOTE))
+        val mask = scaleMask(p)
+        correct(notes, mask, strength, flatten, flatten, shift, p.bool(Specs.MONOTONE), monotoneNote(an, p, shift, mask))
+    }
+
+    fun scaleMask(p: VoiceParams): Int = Scales.mask(p.int(Specs.SCALE), p.int(Specs.KEY), p[Specs.CUSTOM_MASK].roundToInt())
+
+    /** The note Monotone holds: the chosen one, or the allowed note nearest the clip's average pitch after [globalShift]. */
+    fun monotoneNote(an: Analysis, p: VoiceParams, globalShift: Double, mask: Int = scaleMask(p)): Int {
+        val med = an.medianMidi()
+        return if (!p.bool(Specs.MONO_AUTO) || med.isNaN()) p.int(Specs.MONO_NOTE) else Scales.nearestAllowed(med + globalShift, mask)
     }
 
     /** Global shift in semitones: manual shift plus register matching. */

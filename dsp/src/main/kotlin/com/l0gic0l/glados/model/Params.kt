@@ -28,6 +28,8 @@ class ParamSpec(
     val toggle: Boolean = false,
     val hidden: Boolean = false,
     val formatter: ((Float) -> String)? = null,
+    /** Describes the recording rather than the voice (noise, pitch range), so presets leave it alone. */
+    val input: Boolean = false,
 ) {
     /** Position in [VoiceParams]; assigned by [Specs]. */
     var index: Int = -1
@@ -69,8 +71,8 @@ object Specs {
     private fun slider(
         id: String, label: String, group: Group, min: Float, max: Float, default: Float,
         step: Float = 1f, unit: String = "", help: String = "",
-        formatter: ((Float) -> String)? = null,
-    ) = reg(ParamSpec(id, label, group, min, max, default, step, unit, help, formatter = formatter))
+        formatter: ((Float) -> String)? = null, input: Boolean = false,
+    ) = reg(ParamSpec(id, label, group, min, max, default, step, unit, help, formatter = formatter, input = input))
 
     private fun toggle(id: String, label: String, group: Group, default: Boolean, help: String = "") =
         reg(ParamSpec(id, label, group, 0f, 1f, if (default) 1f else 0f, 1f, help = help, toggle = true))
@@ -90,9 +92,10 @@ object Specs {
     )
     val STRENGTH = slider("strength", "Strength", Group.TUNING, 0f, 100f, 100f, 1f, "%", "How far toward the target note the pitch is pulled.")
     val SHIFT = slider("shift", "Pitch shift", Group.TUNING, -12f, 12f, 0f, 0.1f, "st", "Transposes the voice before tuning.")
-    val AUTO_REG = toggle("autoReg", "Match target register", Group.TUNING, true, "Measures your average pitch and shifts it to the target register below, so any voice lands near GLaDOS.")
+    val AUTO_REG = toggle("autoReg", "Match target register", Group.TUNING, false, "Measures your average pitch and shifts it to the target register below, so any voice lands at that pitch.")
     val REG_HZ = slider("regHz", "Target register", Group.TUNING, 120f, 400f, 215f, 5f, "Hz", "Average pitch the voice is moved to.")
     val MONOTONE = toggle("monotone", "Monotone", Group.TUNING, false, "Force every word onto a single note.")
+    val MONO_AUTO = toggle("monoAuto", "Monotone at your own pitch", Group.TUNING, true, "Holds the voice on the scale note nearest its average pitch. Turn off to choose the note below.")
     val MONO_NOTE = slider(
         "monoNote", "Monotone note", Group.TUNING, 36f, 84f, 57f, 1f,
         formatter = { Scales.noteName(it.roundToInt()) },
@@ -102,15 +105,21 @@ object Specs {
     val REF_A4 = slider("refA4", "Reference A4", Group.TUNING, 415f, 466f, 440f, 1f, "Hz")
 
     // ---- Voice ----
+    val DENOISE = slider(
+        "denoise", "Noise reduction", Group.VOICE, 0f, 100f, 50f, 1f, "%",
+        "Removes steady background noise such as hiss, fans and hum before the voice is processed. Higher removes more, at some cost to the voice.",
+        input = true,
+    )
     val FORMANT = slider("formant", "Formant shift", Group.VOICE, -12f, 12f, 1.5f, 0.1f, "st", "Moves the vocal tract character without changing pitch. Up is smaller and more feminine.")
     val FORMANT_FOLLOW = slider(
         "formantFollow", "Formants follow pitch", Group.VOICE, 0f, 100f, 35f, 1f, "%",
         "Moves formants a fraction of however far the pitch is shifted, so a deep voice raised to GLaDOS pitch also gets a smaller vocal tract.",
     )
-    val FMIN = slider("fmin", "Lowest pitch", Group.VOICE, 50f, 300f, 85f, 5f, "Hz", "Lowest voice pitch to look for.")
-    val FMAX = slider("fmax", "Highest pitch", Group.VOICE, 300f, 1200f, 700f, 10f, "Hz")
-    val VOICING = slider("voicing", "Voicing sensitivity", Group.VOICE, 0f, 100f, 60f, 1f, "%", "How readily sound counts as pitched voice. Raise it for quiet, noisy, breathy or echoey recordings; lower it if background sound is being tuned.")
+    val FMIN = slider("fmin", "Lowest pitch", Group.VOICE, 50f, 300f, 85f, 5f, "Hz", "Lowest voice pitch to look for.", input = true)
+    val FMAX = slider("fmax", "Highest pitch", Group.VOICE, 300f, 1200f, 700f, 10f, "Hz", input = true)
+    val VOICING = slider("voicing", "Voicing sensitivity", Group.VOICE, 0f, 100f, 60f, 1f, "%", "How readily sound counts as pitched voice. Raise it for quiet, noisy, breathy or echoey recordings; lower it if background sound is being tuned.", input = true)
     val BREATH = slider("breath", "Breath and consonants", Group.VOICE, 0f, 200f, 80f, 1f, "%", "Level of unpitched sound such as s and t.")
+    val RASP = slider("rasp", "Rasp", Group.VOICE, 0f, 100f, 0f, 1f, "%", "A gravelly roughness with a breath of air, like a strained or worn voice.")
     val DRY = slider("dry", "Dry voice", Group.VOICE, 0f, 100f, 0f, 1f, "%", "Blends the original voice back in under the tuned one, for a doubled sound.")
 
     // ---- Robot ----
@@ -180,6 +189,13 @@ class VoiceParams private constructor(private val v: FloatArray) {
     }
 
     fun toMap(): Map<String, Float> = Specs.all.associate { it.id to v[it.index] }
+
+    /** These settings with the recording settings (noise reduction, pitch range, voicing) taken from [other]. */
+    fun withInputFrom(other: VoiceParams): VoiceParams {
+        val c = v.copyOf()
+        for (s in Specs.all) if (s.input) c[s.index] = other.v[s.index]
+        return VoiceParams(c)
+    }
 
     override fun equals(other: Any?): Boolean = other is VoiceParams && v.contentEquals(other.v)
     override fun hashCode(): Int = v.contentHashCode()

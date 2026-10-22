@@ -10,7 +10,12 @@ enum class PresetCategory(val title: String) {
 
 class Preset(val name: String, val category: PresetCategory, val blurb: String, val overrides: Map<String, Float>) {
     private val params by lazy { VoiceParams.defaults().withAll(overrides) }
+
+    /** The preset's settings, with the recording settings left at their defaults. */
     fun apply(): VoiceParams = params
+
+    /** The preset's voice, keeping the recording settings (noise reduction, pitch range, voicing) from [current]. */
+    fun applyTo(current: VoiceParams): VoiceParams = params.withInputFrom(current)
 }
 
 object Presets {
@@ -33,7 +38,7 @@ object Presets {
         glados("Portal 1", "Stepped intonation, metallic buzz, digital grit."),
         glados(
             "Portal 2", "Smoother and more human, with chamber reverb.",
-            "retuneMs" to 70f, "strength" to 85f, "formant" to 1f, "regHz" to 205f,
+            "retuneMs" to 70f, "strength" to 85f, "formant" to 1f,
             "ringMix" to 0f, "combMix" to 0f, "crushMix" to 0f, "glitch" to 0f,
             "echoMix" to 6f, "echoMs" to 260f, "echoFb" to 30f,
             "reverbMix" to 22f, "reverbSize" to 70f, "reverbDamp" to 45f,
@@ -41,7 +46,7 @@ object Presets {
         ),
         glados(
             "PotatOS", "Low-voltage and lo-fi, a little drunk.",
-            "autoReg" to 0f, "shift" to -2f, "formant" to -1.5f, "retuneMs" to 45f,
+            "shift" to -2f, "formant" to -1.5f, "retuneMs" to 45f,
             "ringMix" to 0f, "combMix" to 20f, "combMs" to 5f,
             "crushMix" to 70f, "crushBits" to 6f, "crushHold" to 8f, "glitch" to 22f,
             "reverbMix" to 5f, "hpf" to 280f, "lpf" to 3600f, "midDb" to 4f, "midHz" to 1800f,
@@ -64,7 +69,7 @@ object Presets {
         ),
         glados(
             "Monotone", "Every word on one note. Eerily calm.",
-            "monotone" to 1f, "monoNote" to 57f, "retuneMs" to 10f, "glitch" to 5f,
+            "monotone" to 1f, "retuneMs" to 10f, "glitch" to 5f,
         ),
 
         // ---- Aperture Science ----
@@ -73,6 +78,14 @@ object Presets {
             "hpf" to 250f, "lpf" to 6000f, "midDb" to 4f, "midHz" to 2500f, "drive" to 15f,
             "echoMix" to 12f, "echoMs" to 140f, "echoFb" to 25f,
             "reverbMix" to 30f, "reverbSize" to 85f, "reverbDamp" to 60f,
+        ),
+        clean(
+            "Portal 2 announcer", PresetCategory.APERTURE, "Upbeat and autotuned with a light rasp, over the facility PA.",
+            "strength" to 100f, "retuneMs" to 30f, "scale" to 1f,
+            "rasp" to 30f, "drive" to 20f, "combMix" to 10f, "combMs" to 2f, "combFb" to 30f,
+            "hpf" to 160f, "lpf" to 9000f, "lowDb" to -2f, "midDb" to 5f, "midHz" to 2500f, "highDb" to 2f,
+            "echoMix" to 8f, "echoMs" to 180f, "echoFb" to 20f,
+            "reverbMix" to 18f, "reverbSize" to 75f, "reverbDamp" to 50f,
         ),
         clean(
             "Emergency alert", PresetCategory.APERTURE, "Urgent, overdriven PA with a mains buzz.",
@@ -110,7 +123,7 @@ object Presets {
         // ---- Robots and radios ----
         clean(
             "Classic robot", PresetCategory.MACHINES, "Flat, buzzy B-movie robot.",
-            "monotone" to 1f, "monoNote" to 50f, "strength" to 100f, "retuneMs" to 0f,
+            "monotone" to 1f, "monoAuto" to 0f, "monoNote" to 50f, "strength" to 100f, "retuneMs" to 0f,
             "ringMix" to 45f, "ringHz" to 50f, "combMix" to 40f, "combMs" to 5f, "combFb" to 70f, "combMod" to 0f,
             "hpf" to 100f, "lpf" to 6000f,
         ),
@@ -196,6 +209,6 @@ object Presets {
 
     fun byCategory(): Map<PresetCategory, List<Preset>> = all.groupBy { it.category }
 
-    /** The built-in preset whose settings are exactly [p], if any. */
-    fun matching(p: VoiceParams): Preset? = all.firstOrNull { it.apply() == p }
+    /** The built-in preset whose voice settings are exactly those in [p], if any. Recording settings are ignored. */
+    fun matching(p: VoiceParams): Preset? = all.firstOrNull { it.applyTo(p) == p }
 }

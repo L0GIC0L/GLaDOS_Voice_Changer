@@ -180,10 +180,17 @@ class ScreensTest {
     @Test
     fun aNewPresetRetunesAClipUntilItIsEdited() {
         loadClip(autoCorrect = true)
+        vm.setParam(Specs.DENOISE, 85f)
         vm.applyPreset("Monotone")
         val p = vm.params.value
-        val shift = NoteOps.globalShift(vm.clip!!.analysis, p)
-        for (n in vm.edit!!.notes) assertEquals(57.0, n.center + n.offset + shift, 1e-6)
+        assertEquals("presets keep the noise reduction setting", 85f, p[Specs.DENOISE], 0f)
+        assertEquals("Monotone", vm.presetName(p))
+        val an = vm.clip!!.analysis
+        val shift = NoteOps.globalShift(an, p)
+        val held = NoteOps.monotoneNote(an, p, shift)
+        // Monotone holds the speaker's own average pitch rather than a fixed note.
+        assertEquals(held.toDouble(), an.medianMidi(), 0.5)
+        for (n in vm.edit!!.notes) assertEquals(held.toDouble(), n.center + n.offset + shift, 1e-6)
         vm.resetNotes() // a hand edit: from now on presets leave the notes alone
         vm.applyPreset("Portal 1")
         for (n in vm.edit!!.notes) assertEquals(0.0, n.offset, 0.0)

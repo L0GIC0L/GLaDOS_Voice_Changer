@@ -24,12 +24,30 @@ class ModelTest {
         for (p in Presets.all) {
             for ((id, v) in p.overrides) {
                 val spec = Specs.byId[id] ?: error("preset ${p.name} references unknown parameter $id")
+                assertTrue("preset ${p.name} sets the recording setting $id", !spec.input)
                 assertTrue("${p.name}.$id=$v out of [${spec.min}, ${spec.max}]", v in spec.min..spec.max)
             }
         }
         assertEquals(VoiceParams.defaults(), Presets.all.first().apply())
         assertEquals("preset names must be unique", Presets.all.size, Presets.all.map { it.name.lowercase() }.toSet().size)
         for (p in Presets.all) assertEquals(p.name, Presets.matching(p.apply())?.name)
+        // Recording settings belong to the clip, not the voice: presets keep them and still match.
+        val noisy = VoiceParams.defaults().with(Specs.DENOISE, 90f).with(Specs.FMIN, 60f)
+        val announcer = Presets.all.first { it.name == "Announcer" }
+        val applied = announcer.applyTo(noisy)
+        assertEquals(90f, applied[Specs.DENOISE], 0f)
+        assertEquals(60f, applied[Specs.FMIN], 0f)
+        assertEquals("Announcer", Presets.matching(applied)?.name)
+    }
+
+    @Test
+    fun gladosPresetsKeepTheSpeakersOwnPitch() {
+        for (p in Presets.all.filter { it.category == com.l0gic0l.glados.model.PresetCategory.GLADOS }) {
+            val v = p.apply()
+            assertTrue("${p.name} moves the voice to a target register", !v.bool(Specs.AUTO_REG))
+            assertTrue("${p.name} pitches the voice up", v[Specs.SHIFT] <= 0f)
+            if (v.bool(Specs.MONOTONE)) assertTrue("${p.name} holds a fixed note", v.bool(Specs.MONO_AUTO))
+        }
     }
 
     @Test

@@ -128,6 +128,43 @@ private class DelayLine(maxSamples: Int) {
     }
 }
 
+/**
+ * Vocal roughness: the level flutters irregularly at 50 to 170 Hz (the cycle-to-cycle unsteadiness of a strained or
+ * gravelly voice), with a little breath noise riding on the voice. Silence stays silent.
+ */
+private class Rasp(private val sr: Int) {
+    private var target = 0f
+    private var mod = 0f
+    private var holdLeft = 0
+    private var env = 0f
+    private var hissLp = 0f
+    private var rng = 0x6D2B79F5
+    private val modCoef = (1.0 - exp(-2.0 * PI * 300.0 / sr)).toFloat()
+    private val envCoef = (1.0 - exp(-1.0 / (0.01 * sr))).toFloat()
+    private val hissCoef = (1.0 - exp(-2.0 * PI * 1500.0 / sr)).toFloat()
+
+    private fun rand(): Float {
+        rng = rng xor (rng shl 13)
+        rng = rng xor (rng ushr 17)
+        rng = rng xor (rng shl 5)
+        return (rng ushr 8) / 8388608f - 1f
+    }
+
+    fun process(x: Float, amount: Float): Float {
+        if (--holdLeft <= 0) {
+            target = rand()
+            holdLeft = ((0.006f + 0.014f * (rand() * 0.5f + 0.5f)) * sr).toInt().coerceAtLeast(1)
+        }
+        mod += (target - mod) * modCoef
+        env += (abs(x) - env) * envCoef
+        // High-passed noise for the breathy part, scaled by how loud the voice is right now.
+        val n = rand()
+        hissLp += (n - hissLp) * hissCoef
+        val breath = (n - hissLp) * env * 0.5f
+        return x * (1f + 0.6f * amount * mod) + breath * amount
+    }
+}
+
 /** Short feedback comb with a slow LFO on the delay: the "metallic" and flanged character. */
 private class ModComb(private val sr: Int) {
     private val line = DelayLine((sr * 0.04).toInt())
@@ -424,7 +461,7 @@ private class Limiter(sr: Int) {
 }
 
 /**
- * The GLaDOS effect chain, applied to a mono stream: ring mod, distortion, metal comb, bit crush, glitches, buzz,
+ * The GLaDOS effect chain, applied to a mono stream: ring mod, rasp, distortion, metal comb, bit crush, glitches, buzz,
  * EQ, echo, reverb, output gain and a safety limiter. One instance per stream.
  * [configure] and [process] must be called from the same thread.
  */
@@ -432,6 +469,7 @@ class FxChain(private val sampleRate: Int) {
     private val comb = ModComb(sampleRate)
     private val crusher = BitCrusher(sampleRate)
     private val drive = Drive()
+    private val rasp = Rasp(sampleRate)
     private val glitches = Glitches(sampleRate)
     private val buzz = Buzz(sampleRate)
     private val echo = Echo(sampleRate)
@@ -457,6 +495,7 @@ class FxChain(private val sampleRate: Int) {
     private var crushMix = 0f
     private var crushBits = 10
     private var crushHold = 3
+    private var raspAmount = 0f
     private var buzzAmount = 0f
     private var buzzHz = 100f
     private var echoMix = 0f
@@ -467,6 +506,7 @@ class FxChain(private val sampleRate: Int) {
     private var reverbDamp = 0.5f
     private var outGain = 1f
 
+    private var raspOn = false
     private var driveOn = false
     private var combOn = false
     private var crushOn = false
@@ -496,6 +536,7 @@ class FxChain(private val sampleRate: Int) {
         glitches.stutterLen = (p[Specs.GLITCH_MS] * 0.001f * sampleRate).roundToInt()
         glitches.jumpRatio = 2.0.pow(p[Specs.GLITCH_JUMP] / 12.0)
         drive.set(p[Specs.DRIVE] / 100f)
+        raspAmount = p[Specs.RASP] / 100f
         buzzAmount = p[Specs.BUZZ] / 100f
         buzzHz = p[Specs.BUZZ_HZ]
         echoMix = p[Specs.ECHO_MIX] / 100f
@@ -506,6 +547,7 @@ class FxChain(private val sampleRate: Int) {
         reverbDamp = p[Specs.REVERB_DAMP] / 100f
         outGain = 10f.pow(p[Specs.OUT_DB] / 20f)
 
+        raspOn = raspAmount > 0.001f
         driveOn = p[Specs.DRIVE] > 0.5f
         combOn = combMix > 0.001f
         crushOn = crushMix > 0.001f
@@ -542,6 +584,7 @@ class FxChain(private val sampleRate: Int) {
                 if (ringPhase > 2 * PI) ringPhase -= 2 * PI
                 x = x * (1f - rm) + x * sin(ringPhase).toFloat() * rm
             }
+            if (raspOn) x = rasp.process(x, raspAmount)
             if (driveOn) x = drive.process(x)
             if (combOn) x = comb.process(x, combMix, combMs, combFb, combDepth, combRate)
             if (crushOn) x = crusher.process(x, crushMix, crushBits, crushHold)

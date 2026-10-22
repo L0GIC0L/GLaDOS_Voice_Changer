@@ -255,7 +255,7 @@ private fun DetectionCard(vm: MainViewModel, params: com.l0gic0l.glados.model.Vo
     val voicedPercent = (100.0 * an.voiced.count { it } / an.frames.coerceAtLeast(1)).roundToInt()
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Voice detection", style = MaterialTheme.typography.titleMedium)
+            Text("Clean-up and detection", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Found ${vm.edit?.notes?.size ?: 0} notes. $voicedPercent% of the clip is pitched voice.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -274,11 +274,19 @@ private fun DetectionCard(vm: MainViewModel, params: com.l0gic0l.glados.model.Vo
                     color = MaterialTheme.colorScheme.tertiary,
                 )
             }
+            ParamControl(Specs.DENOISE, params, vm::setParam)
+            if (!clip.noisy) {
+                Text(
+                    "Generated speech is already clean, so noise reduction is skipped for it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             ParamControl(Specs.VOICING, params, vm::setParam)
             ParamControl(Specs.FMIN, params, vm::setParam)
             ParamControl(Specs.FMAX, params, vm::setParam)
             Text(
-                "These re-analyse the clip automatically while you have not edited it yet.",
+                "Voicing and the pitch range re-analyse the clip automatically while you have not edited it yet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

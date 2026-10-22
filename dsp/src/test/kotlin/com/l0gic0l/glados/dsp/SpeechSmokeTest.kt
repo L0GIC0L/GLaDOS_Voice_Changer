@@ -42,7 +42,7 @@ class SpeechSmokeTest {
             val t1 = System.nanoTime()
             val edit = NoteOps.segment(an)
             val shift = NoteOps.globalShift(an, p)
-            NoteOps.correctToSettings(edit.notes, p, shift)
+            NoteOps.correctToSettings(edit.notes, an, p)
             val t2 = System.nanoTime()
             val y = OfflineRenderer.render(a.samples, an, edit, RenderSettings(shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f))
             val t3 = System.nanoTime()
