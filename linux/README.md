@@ -25,7 +25,7 @@ cd linux
 cargo run --release
 ```
 
-To add it to your applications menu: `cargo build --release && data/install.sh` (installs to `~/.local`). `glados-voice some-file.mp3`, or *Open with* in your file manager, opens a recording straight in the editor.
+To add it to your applications menu: `cargo build --release && data/install.sh` (installs to `~/.local`). From a prebuilt download, unpack it and run `data/install.sh` inside it; the prebuilt binary needs the same GTK 4.14 and libadwaita 1.5 or newer. `glados-voice some-file.mp3`, or *Open with* in your file manager, opens a recording straight in the editor.
 
 Speech uses `espeak-ng`, which sounds robotic and makes a good GLaDOS base. For natural voices, install [Piper](https://github.com/rhasspy/piper) so that `piper` is on your PATH, download a voice model (`.onnx` plus its `.onnx.json`), and pick it on the Speak tab.
 
