@@ -7,8 +7,10 @@ import kotlin.math.roundToInt
 enum class Group(val title: String, val blurb: String) {
     TUNING("Tuning", "Which notes the voice is pulled to, and how hard."),
     VOICE("Voice", "Register, formants and pitch detection."),
+    SPEED("Speed and harmony", "How fast the voice talks, random speed changes, and a second voice."),
     ROBOT("Robot", "The metallic, digital character."),
-    GLITCH("Glitches", "Random malfunctions. They only fire while there is voice, so silence stays silent."),
+    GLITCH("Glitches", "Random malfunctions. Apart from crackle, they only fire while there is voice."),
+    MOTION("Movement", "Effects that sweep, pulse and waver."),
     SPACE("Space", "Echo and the test chamber."),
     OUTPUT("EQ and output", "Final tone shaping and level."),
 }
@@ -122,6 +124,15 @@ object Specs {
     val RASP = slider("rasp", "Rasp", Group.VOICE, 0f, 100f, 0f, 1f, "%", "A gravelly roughness with a breath of air, like a strained or worn voice.")
     val DRY = slider("dry", "Dry voice", Group.VOICE, 0f, 100f, 0f, 1f, "%", "Blends the original voice back in under the tuned one, for a doubled sound.")
 
+    // ---- Speed and harmony ----
+    val TEMPO = slider("tempo", "Speed", Group.SPEED, 50f, 200f, 100f, 1f, "%", "Talks faster or slower without changing pitch.")
+    val SPEED_RANDOM = slider(
+        "speedRandom", "Random speed changes", Group.SPEED, 0f, 100f, 0f, 1f, "%",
+        "Now and then rushes ahead or drags for a moment, without changing pitch. Higher is more often and more extreme.",
+    )
+    val HARMONY_MIX = slider("harmonyMix", "Harmony voice", Group.SPEED, 0f, 100f, 0f, 1f, "%", "Adds a second copy of the voice at the interval below, like a duet with yourself.")
+    val HARMONY_ST = slider("harmonySt", "Harmony interval", Group.SPEED, -24f, 24f, -12f, 1f, "st", "-12 is an octave down, 7 a fifth up, 12 an octave up.")
+
     // ---- Robot ----
     val DRIVE = slider("drive", "Distortion", Group.ROBOT, 0f, 100f, 0f, 1f, "%", "Overdrives the voice like a cheap speaker or megaphone.")
     val RING_MIX = slider("ringMix", "Ring mod mix", Group.ROBOT, 0f, 100f, 10f, 1f, "%")
@@ -144,8 +155,17 @@ object Specs {
     val GLITCH_JUMP = slider("glitchJumpSt", "Jump size", Group.GLITCH, -24f, 24f, 12f, 1f, "st", "How far a pitch jump goes. Negative values jump down.")
     val GLITCH_DROP = slider("glitchDrop", "Dropouts", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Brief cuts to silence, like a bad connection.")
     val GLITCH_STATIC = slider("glitchStatic", "Static bursts", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Crackles of radio static over the voice.")
+    val CRACKLE = slider("crackle", "Crackle", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "Dust and scratches like an old record.")
     val BUZZ = slider("buzz", "Electrical buzz", Group.GLITCH, 0f, 100f, 0f, 1f, "%", "A mains hum that comes and goes with the voice.")
     val BUZZ_HZ = slider("buzzHz", "Buzz pitch", Group.GLITCH, 40f, 240f, 100f, 1f, "Hz")
+
+    // ---- Movement ----
+    val CHORUS = slider("chorusMix", "Chorus", Group.MOTION, 0f, 100f, 0f, 1f, "%", "Thickens the voice into a small crowd.")
+    val PHASER = slider("phaserMix", "Phaser", Group.MOTION, 0f, 100f, 0f, 1f, "%", "A sweeping, jet-like whoosh.")
+    val PHASER_RATE = slider("phaserRate", "Phaser rate", Group.MOTION, 0.05f, 5f, 0.4f, 0.05f, "Hz")
+    val TREMOLO = slider("tremolo", "Tremolo", Group.MOTION, 0f, 100f, 0f, 1f, "%", "Pulses the volume up and down.")
+    val TREMOLO_RATE = slider("tremoloRate", "Tremolo rate", Group.MOTION, 0.5f, 20f, 6f, 0.5f, "Hz")
+    val WARBLE = slider("warble", "Tape warble", Group.MOTION, 0f, 100f, 0f, 1f, "%", "The wavering pitch of a worn tape or record.")
 
     // ---- Space ----
     val ECHO_MIX = slider("echoMix", "Echo mix", Group.SPACE, 0f, 100f, 0f, 1f, "%")

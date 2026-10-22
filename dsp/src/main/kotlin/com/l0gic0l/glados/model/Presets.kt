@@ -71,6 +71,15 @@ object Presets {
             "Monotone", "Every word on one note. Eerily calm.",
             "monotone" to 1f, "retuneMs" to 10f, "glitch" to 5f,
         ),
+        glados(
+            "Malfunctioning", "Rushing, dragging and stuttering as her circuits fail.",
+            "speedRandom" to 45f, "glitch" to 20f, "glitchTape" to 10f, "glitchPitch" to 10f, "buzz" to 10f,
+        ),
+        glados(
+            "Final boss", "Doubled an octave down and booming round the chamber.",
+            "harmonyMix" to 45f, "harmonySt" to -12f, "drive" to 15f, "glitch" to 0f,
+            "echoMix" to 12f, "echoMs" to 320f, "reverbMix" to 30f, "reverbSize" to 85f,
+        ),
 
         // ---- Aperture Science ----
         clean(
@@ -86,6 +95,24 @@ object Presets {
             "hpf" to 160f, "lpf" to 9000f, "lowDb" to -2f, "midDb" to 5f, "midHz" to 2500f, "highDb" to 2f,
             "echoMix" to 8f, "echoMs" to 180f, "echoFb" to 20f,
             "reverbMix" to 18f, "reverbSize" to 75f, "reverbDamp" to 50f,
+        ),
+        clean(
+            "Old Aperture tape", PresetCategory.APERTURE, "A worn reel-to-reel training film from the early days.",
+            "hpf" to 250f, "lpf" to 4500f, "midDb" to 4f, "midHz" to 1500f, "drive" to 15f,
+            "warble" to 45f, "crackle" to 35f, "crushMix" to 10f, "crushBits" to 10f, "reverbMix" to 8f,
+        ),
+        clean(
+            "Turret choir", PresetCategory.APERTURE, "Turrets singing in harmony.",
+            "autoReg" to 1f, "regHz" to 330f, "formant" to 4f, "formantFollow" to 60f,
+            "strength" to 100f, "retuneMs" to 5f, "scale" to 1f,
+            "harmonyMix" to 55f, "harmonySt" to 7f, "chorusMix" to 50f,
+            "combMix" to 15f, "combMs" to 1.5f, "hpf" to 220f, "lpf" to 10000f,
+            "reverbMix" to 30f, "reverbSize" to 80f,
+        ),
+        clean(
+            "Hive mind", PresetCategory.APERTURE, "A crowd of cores speaking as one.",
+            "chorusMix" to 80f, "harmonyMix" to 35f, "harmonySt" to -12f, "phaserMix" to 20f,
+            "ringMix" to 10f, "hpf" to 120f, "lpf" to 9000f, "reverbMix" to 20f, "reverbSize" to 70f,
         ),
         clean(
             "Emergency alert", PresetCategory.APERTURE, "Urgent, overdriven PA with a mains buzz.",
@@ -144,6 +171,16 @@ object Presets {
             "crushMix" to 20f, "crushBits" to 8f, "buzz" to 10f, "buzzHz" to 50f, "hpf" to 120f, "lpf" to 7000f,
         ),
         clean(
+            "Jet robot", PresetCategory.MACHINES, "A hard-tuned robot with a sweeping phaser.",
+            "strength" to 100f, "retuneMs" to 0f, "phaserMix" to 80f, "phaserRate" to 0.3f,
+            "ringMix" to 20f, "ringHz" to 70f, "combMix" to 30f, "hpf" to 100f, "lpf" to 9000f,
+        ),
+        clean(
+            "Drunk robot", PresetCategory.MACHINES, "Can't keep a steady speed or pitch.",
+            "strength" to 100f, "retuneMs" to 0f, "speedRandom" to 60f, "warble" to 50f,
+            "ringMix" to 25f, "ringHz" to 60f, "glitchPitch" to 10f, "hpf" to 100f, "lpf" to 8000f,
+        ),
+        clean(
             "Radio transmission", PresetCategory.MACHINES, "Distant walkie-talkie with crackles and drops.",
             "hpf" to 450f, "lpf" to 3000f, "midDb" to 5f, "midHz" to 1800f, "drive" to 40f,
             "glitchStatic" to 30f, "glitchDrop" to 10f, "crushMix" to 15f, "crushBits" to 8f, "buzz" to 5f,
@@ -163,6 +200,22 @@ object Presets {
             "hpf" to 120f, "lpf" to 8000f, "lowDb" to 3f, "midDb" to 3f, "drive" to 10f,
             "echoMix" to 35f, "echoMs" to 380f, "echoFb" to 45f,
             "reverbMix" to 35f, "reverbSize" to 95f, "reverbDamp" to 40f,
+        ),
+        clean(
+            "Old radio broadcast", PresetCategory.MACHINES, "A crackly 1940s wireless.",
+            "hpf" to 350f, "lpf" to 3500f, "midDb" to 5f, "midHz" to 1800f, "drive" to 20f,
+            "crackle" to 30f, "warble" to 20f, "reverbMix" to 6f,
+        ),
+        clean(
+            "Broken record", PresetCategory.MACHINES, "A scratched record that keeps skipping.",
+            "crackle" to 60f, "warble" to 40f, "glitch" to 40f, "glitchMs" to 150f, "glitchDrop" to 10f,
+            "hpf" to 200f, "lpf" to 6000f,
+        ),
+        clean(
+            "Underwater", PresetCategory.MACHINES, "Muffled, wobbling and submerged.",
+            "lpf" to 2000f, "highDb" to -8f, "lowDb" to 4f, "phaserMix" to 50f, "phaserRate" to 0.15f,
+            "warble" to 60f, "chorusMix" to 40f, "tremolo" to 20f, "tremoloRate" to 3f,
+            "reverbMix" to 40f, "reverbSize" to 70f, "reverbDamp" to 90f,
         ),
 
         // ---- Characters ----
@@ -199,11 +252,36 @@ object Presets {
             "hpf" to 250f, "lpf" to 6000f, "outDb" to -2f,
         ),
 
+        clean(
+            "Fast talker", PresetCategory.CHARACTERS, "In a tearing hurry.",
+            "tempo" to 155f, "speedRandom" to 15f,
+        ),
+        clean(
+            "Slow motion", PresetCategory.CHARACTERS, "Everything at half speed and deeper.",
+            "tempo" to 60f, "shift" to -6f, "formant" to -3f, "reverbMix" to 25f, "reverbSize" to 80f,
+        ),
+        clean(
+            "Cartoon villain", PresetCategory.CHARACTERS, "Deep, doubled and dripping with menace.",
+            "shift" to -4f, "formant" to -2f, "harmonyMix" to 35f, "harmonySt" to -12f, "drive" to 15f,
+            "reverbMix" to 25f, "reverbSize" to 75f,
+        ),
+        clean(
+            "Fairy", PresetCategory.CHARACTERS, "Tiny and sparkling, with an octave-up shimmer.",
+            "shift" to 7f, "formant" to 5f, "harmonyMix" to 40f, "harmonySt" to 12f, "chorusMix" to 50f,
+            "vibDepth" to 20f, "vibRate" to 6f, "reverbMix" to 45f, "reverbSize" to 90f,
+        ),
+        clean(
+            "Haunted doll", PresetCategory.CHARACTERS, "A wind-up toy in an empty house.",
+            "shift" to 5f, "formant" to 4f, "tempo" to 85f, "warble" to 40f, "crackle" to 25f,
+            "tremolo" to 25f, "tremoloRate" to 4f, "reverbMix" to 40f, "reverbSize" to 85f,
+        ),
+
         // ---- Utility ----
         clean(
             "Hard tune", PresetCategory.UTILITY, "Clean snap-to-note autotune with no effects.",
             "strength" to 100f, "retuneMs" to 0f,
         ),
+        clean("Double track", PresetCategory.UTILITY, "Your own voice, thickened with a light chorus.", "chorusMix" to 40f),
         clean("Natural", PresetCategory.UTILITY, "Barely processed. Useful as a starting point."),
     )
 

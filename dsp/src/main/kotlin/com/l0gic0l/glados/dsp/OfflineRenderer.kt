@@ -16,11 +16,17 @@ class RenderSettings(
     val vibratoHz: Double = 5.5,
     /** 0..1 share of the original, unedited voice blended into the result. */
     val dry: Float = 0f,
+    /** 0..1 level of a second voice [harmonySt] semitones away. */
+    val harmonyMix: Float = 0f,
+    val harmonySt: Double = -12.0,
+    /** Tempo and random speed changes; null keeps the timeline's own speed. Must be built for the clip's length. */
+    val warp: SpeedWarp? = null,
 )
 
 /**
  * Non-real-time PSOLA: rebuilds the clip from the edited notes, honouring pitch, formant, gain and
  * timing edits. Marks and the pitch contour come from a full-clip [Analysis], so it can look ahead and stretch time.
+ * The result is [SpeedWarp.renderedLength] samples long when [RenderSettings.warp] is set, otherwise as long as [x].
  */
 object OfflineRenderer {
     private const val PAD = 8192
@@ -29,13 +35,41 @@ object OfflineRenderer {
         x: FloatArray, an: Analysis, edit: Edit, settings: RenderSettings, cancelled: () -> Boolean = { false },
     ): FloatArray {
         val n = x.size
+        val warp = settings.warp ?: SpeedWarp.identity(n)
+        val timeMap = edit.timeMap(n)
+        val out = renderVoice(x, an, edit, timeMap, warp, settings, settings.pitchShift, cancelled)
+        val h = settings.harmonyMix.coerceIn(0f, 1f)
+        if (h > 0f) {
+            val harmony = renderVoice(x, an, edit, timeMap, warp, settings, settings.pitchShift + settings.harmonySt, cancelled)
+            val level = 1f / (1f + 0.5f * h)
+            for (i in out.indices) out[i] = (out[i] + harmony[i] * h) * level
+        }
+        val d = settings.dry.coerceIn(0f, 1f)
+        if (d > 0f) {
+            // The original voice, following any timing and speed changes so it stays in step with the tuned one.
+            for (i in out.indices) {
+                val a = timeMap.toInput(warp.toTimeline(i.toDouble())).coerceIn(0.0, (n - 1).toDouble())
+                val j = a.toInt()
+                val f = (a - j).toFloat()
+                val dryV = x[j] + (x[min(j + 1, n - 1)] - x[j]) * f
+                out[i] = out[i] * (1f - d) + dryV * d
+            }
+        }
+        return out
+    }
+
+    private fun renderVoice(
+        x: FloatArray, an: Analysis, edit: Edit, timeMap: TimeMap, warp: SpeedWarp, settings: RenderSettings,
+        pitchShift: Double, cancelled: () -> Boolean,
+    ): FloatArray {
+        val n = x.size
+        val outLen = warp.renderedLength
         val sr = an.sampleRate
         val src = FloatArray(n + 2 * PAD)
         System.arraycopy(x, 0, src, PAD, n)
-        val acc = FloatArray(n + 2 * PAD)
-        val norm = FloatArray(n + 2 * PAD)
+        val acc = FloatArray(outLen + 2 * PAD)
+        val norm = FloatArray(outLen + 2 * PAD)
 
-        val timeMap = edit.timeMap(n)
         val noteOfFrame = IntArray(an.frames) { -1 }
         edit.notes.forEachIndexed { idx, note ->
             for (f in max(0, note.f0)..min(an.frames - 1, note.f1)) noteOfFrame[f] = idx
@@ -46,9 +80,9 @@ object OfflineRenderer {
 
         var s = 0.0
         var grains = 0
-        while (s < n) {
+        while (s < outLen) {
             if (++grains % 512 == 0 && cancelled()) break
-            val a = timeMap.toInput(s).coerceIn(0.0, (n - 1).toDouble())
+            val a = timeMap.toInput(warp.toTimeline(s)).coerceIn(0.0, (n - 1).toDouble())
             val frame = a / an.hop
             val fi = frame.toInt().coerceIn(0, an.frames - 1)
             var markIdx = -1
@@ -63,7 +97,7 @@ object OfflineRenderer {
                 val note = edit.notes.getOrNull(noteOfFrame[fi])
                 val inMidi = an.midiAt(frame)
                 val vibrato = settings.vibratoCents / 100.0 * sin(2 * PI * settings.vibratoHz * s / sr)
-                val outMidi = (if (note != null) note.pitchAt(frame) else inMidi) + settings.pitchShift + vibrato
+                val outMidi = (if (note != null) note.pitchAt(frame) else inMidi) + pitchShift + vibrato
                 val ts = sr / Pitch.midiToHz(outMidi, an.a4).coerceIn(40.0, 1600.0)
                 val rho = (baseRho * 2.0.pow((note?.formant ?: 0f) / 12.0)).coerceIn(0.4, 2.5)
                 val gain = if (note == null || note.gainDb == 0f) 1f else 10f.pow(note.gainDb / 20f)
@@ -79,19 +113,7 @@ object OfflineRenderer {
             }
         }
 
-        val out = FloatArray(n) { acc[it + PAD] / max(norm[it + PAD], Grain.NORM_FLOOR) }
-        val d = settings.dry.coerceIn(0f, 1f)
-        if (d > 0f) {
-            // The original voice, following any timing edits so it stays in step with the tuned one.
-            for (i in 0 until n) {
-                val a = timeMap.toInput(i.toDouble()).coerceIn(0.0, (n - 1).toDouble())
-                val j = a.toInt()
-                val f = (a - j).toFloat()
-                val dryV = x[j] + (x[min(j + 1, n - 1)] - x[j]) * f
-                out[i] = out[i] * (1f - d) + dryV * d
-            }
-        }
-        return out
+        return FloatArray(outLen) { acc[it + PAD] / max(norm[it + PAD], Grain.NORM_FLOOR) }
     }
 
     private fun nearestMark(marks: IntArray, t: Double): Int {

@@ -13,6 +13,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tan
 import kotlin.math.tanh
 
 /** One-pole parameter smoother to avoid zipper noise when a slider moves. */
@@ -375,6 +376,121 @@ private class Buzz(private val sr: Int) {
     }
 }
 
+/** Three slowly drifting delayed copies mixed under the voice: a small crowd. */
+private class Chorus(private val sr: Int) {
+    private val line = DelayLine((sr * 0.05).toInt())
+    private val phase = doubleArrayOf(0.0, 2.1, 4.2)
+    private val rate = doubleArrayOf(0.31, 0.43, 0.57)
+    private val base = doubleArrayOf(0.012, 0.019, 0.027)
+    private val mixS = Smooth(0f, sr)
+
+    fun clear() = line.clear()
+
+    fun process(x: Float, mix: Float): Float {
+        line.write(x)
+        var wet = 0f
+        for (v in 0..2) {
+            phase[v] += 2 * PI * rate[v] / sr
+            if (phase[v] > 2 * PI) phase[v] -= 2 * PI
+            wet += line.read((base[v] + 0.003 * sin(phase[v])) * sr)
+        }
+        val m = mixS.next(mix)
+        return (x + wet * 0.67f * m) / (1f + 0.6f * m)
+    }
+}
+
+/** Six swept all-pass stages mixed with the dry voice, carving moving notches: the classic jet whoosh. */
+private class Phaser(private val sr: Int) {
+    private val z = FloatArray(6)
+    private var lfo = 0.0
+    private var feedback = 0f
+    private val mixS = Smooth(0f, sr)
+
+    fun clear() {
+        z.fill(0f)
+        feedback = 0f
+    }
+
+    fun process(x: Float, mix: Float, rateHz: Float): Float {
+        lfo += 2 * PI * rateHz / sr
+        if (lfo > 2 * PI) lfo -= 2 * PI
+        val f = 300.0 * 2.0.pow(3.0 * (0.5 + 0.5 * sin(lfo))) // 300 Hz to 2.4 kHz
+        val t = tan(PI * f / sr)
+        val a = ((t - 1) / (t + 1)).toFloat()
+        var y = x + feedback * 0.5f
+        for (i in z.indices) {
+            val o = a * y + z[i]
+            z[i] = y - a * o
+            y = o
+        }
+        feedback = y
+        val m = mixS.next(mix)
+        return x * (1f - 0.5f * m) + y * 0.5f * m
+    }
+}
+
+/** Tape wow and flutter: a slowly wandering delay, which bends the pitch a little up and down. */
+private class Warble(private val sr: Int) {
+    private val line = DelayLine((sr * 0.03).toInt())
+    private var wow = 0.0
+    private var flutter = 0.0
+    private var drift = 0f
+    private var driftTarget = 0f
+    private var driftLeft = 0
+    private var rng = 0x1B873593
+    private val amountS = Smooth(0f, sr, 0.05f)
+
+    fun clear() = line.clear()
+
+    private fun rand(): Float {
+        rng = rng xor (rng shl 13)
+        rng = rng xor (rng ushr 17)
+        rng = rng xor (rng shl 5)
+        return (rng ushr 8) / 8388608f - 1f
+    }
+
+    fun process(x: Float, amount: Float): Float {
+        line.write(x)
+        wow += 2 * PI * 0.55 / sr
+        if (wow > 2 * PI) wow -= 2 * PI
+        flutter += 2 * PI * 7.5 / sr
+        if (flutter > 2 * PI) flutter -= 2 * PI
+        if (--driftLeft <= 0) {
+            driftTarget = rand()
+            driftLeft = ((0.3f + 0.35f * (rand() + 1f)) * sr).toInt()
+        }
+        drift += (driftTarget - drift) / (0.3f * sr)
+        val a = amountS.next(amount)
+        val d = 0.008 * sr + a * sr * (0.0035 * sin(wow) + 0.0015 * drift + 0.00008 * sin(flutter))
+        return line.read(d)
+    }
+}
+
+/** Record surface noise: random clicks and the odd pop over a faint hiss. Unlike the glitches it never stops. */
+private class Crackle(private val sr: Int) {
+    private var click = 0f
+    private var hissLp = 0f
+    private var rng = 0x27D4EB2F
+    private val decay = exp(-1.0 / (0.0003 * sr)).toFloat()
+
+    private fun rand01(): Float {
+        rng = rng xor (rng shl 13)
+        rng = rng xor (rng ushr 17)
+        rng = rng xor (rng shl 5)
+        return (rng ushr 8) / 16777216f
+    }
+
+    fun process(x: Float, amount: Float): Float {
+        if (rand01() < amount * 40f / sr) {
+            val size = rand01()
+            click += (if (rand01() < 0.5f) -1f else 1f) * (0.03f + 0.3f * size * size * size) * amount
+        }
+        click *= decay
+        hissLp += ((rand01() - 0.5f) - hissLp) * 0.3f
+        return x + click + hissLp * 0.01f * amount
+    }
+}
+
 private class Echo(private val sr: Int) {
     private val line = DelayLine(sr)
     private var damp = 0f
@@ -462,7 +578,7 @@ private class Limiter(sr: Int) {
 
 /**
  * The GLaDOS effect chain, applied to a mono stream: ring mod, rasp, distortion, metal comb, bit crush, glitches, buzz,
- * EQ, echo, reverb, output gain and a safety limiter. One instance per stream.
+ * tape warble, crackle, EQ, chorus, phaser, tremolo, echo, reverb, output gain and a safety limiter. One instance per stream.
  * [configure] and [process] must be called from the same thread.
  */
 class FxChain(private val sampleRate: Int) {
@@ -472,6 +588,12 @@ class FxChain(private val sampleRate: Int) {
     private val rasp = Rasp(sampleRate)
     private val glitches = Glitches(sampleRate)
     private val buzz = Buzz(sampleRate)
+    private val warble = Warble(sampleRate)
+    private val crackle = Crackle(sampleRate)
+    private val chorus = Chorus(sampleRate)
+    private val phaser = Phaser(sampleRate)
+    private val tremoloDepthS = Smooth(0f, sampleRate)
+    private var tremoloPhase = 0.0
     private val echo = Echo(sampleRate)
     private val reverb = Reverb(sampleRate)
     private val limiter = Limiter(sampleRate)
@@ -497,6 +619,13 @@ class FxChain(private val sampleRate: Int) {
     private var crushHold = 3
     private var raspAmount = 0f
     private var buzzAmount = 0f
+    private var warbleAmount = 0f
+    private var crackleAmount = 0f
+    private var chorusMix = 0f
+    private var phaserMix = 0f
+    private var phaserRate = 0.4f
+    private var tremoloDepth = 0f
+    private var tremoloRate = 6f
     private var buzzHz = 100f
     private var echoMix = 0f
     private var echoMs = 220f
@@ -512,6 +641,11 @@ class FxChain(private val sampleRate: Int) {
     private var crushOn = false
     private var glitchOn = false
     private var buzzOn = false
+    private var warbleOn = false
+    private var crackleOn = false
+    private var chorusOn = false
+    private var phaserOn = false
+    private var tremoloOn = false
     private var echoOn = false
     private var reverbOn = false
 
@@ -538,6 +672,13 @@ class FxChain(private val sampleRate: Int) {
         drive.set(p[Specs.DRIVE] / 100f)
         raspAmount = p[Specs.RASP] / 100f
         buzzAmount = p[Specs.BUZZ] / 100f
+        warbleAmount = p[Specs.WARBLE] / 100f
+        crackleAmount = p[Specs.CRACKLE] / 100f
+        chorusMix = p[Specs.CHORUS] / 100f
+        phaserMix = p[Specs.PHASER] / 100f
+        phaserRate = p[Specs.PHASER_RATE]
+        tremoloDepth = p[Specs.TREMOLO] / 100f
+        tremoloRate = p[Specs.TREMOLO_RATE]
         buzzHz = p[Specs.BUZZ_HZ]
         echoMix = p[Specs.ECHO_MIX] / 100f
         echoMs = p[Specs.ECHO_MS]
@@ -553,6 +694,14 @@ class FxChain(private val sampleRate: Int) {
         crushOn = crushMix > 0.001f
         glitchOn = rates.any { it > 0f }
         buzzOn = buzzAmount > 0.001f
+        warbleOn = warbleAmount > 0.001f
+        crackleOn = crackleAmount > 0.001f
+        chorusOn = chorusMix > 0.001f
+        phaserOn = phaserMix > 0.001f
+        tremoloOn = tremoloDepth > 0.001f
+        if (!warbleOn) warble.clear()
+        if (!chorusOn) chorus.clear()
+        if (!phaserOn) phaser.clear()
         echoOn = echoMix > 0.001f
         reverbOn = reverbMix > 0.001f
         if (!combOn) comb.clear()
@@ -569,6 +718,7 @@ class FxChain(private val sampleRate: Int) {
 
     fun reset() {
         comb.clear(); glitches.clear(); echo.clear(); reverb.clear()
+        warble.clear(); chorus.clear(); phaser.clear()
         hpf.reset(); lowShelf.reset(); presence.reset(); highShelf.reset(); lpf.reset()
     }
 
@@ -590,12 +740,22 @@ class FxChain(private val sampleRate: Int) {
             if (crushOn) x = crusher.process(x, crushMix, crushBits, crushHold)
             if (glitchOn) x = glitches.process(x)
             if (buzzOn) x = buzz.process(x, buzzAmount, buzzHz)
+            if (warbleOn) x = warble.process(x, warbleAmount)
+            if (crackleOn) x = crackle.process(x, crackleAmount)
 
             x = hpf.process(x)
             x = lowShelf.process(x)
             x = presence.process(x)
             x = highShelf.process(x)
             x = lpf.process(x)
+
+            if (chorusOn) x = chorus.process(x, chorusMix)
+            if (phaserOn) x = phaser.process(x, phaserMix, phaserRate)
+            if (tremoloOn) {
+                tremoloPhase += 2 * PI * tremoloRate / sampleRate
+                if (tremoloPhase > 2 * PI) tremoloPhase -= 2 * PI
+                x *= 1f - tremoloDepthS.next(tremoloDepth) * (0.5f - 0.5f * cos(tremoloPhase).toFloat())
+            }
 
             if (echoOn) x = echo.process(x, echoMix, echoMs, echoFb)
             if (reverbOn) x = reverb.process(x, reverbMix, reverbSize, reverbDamp)

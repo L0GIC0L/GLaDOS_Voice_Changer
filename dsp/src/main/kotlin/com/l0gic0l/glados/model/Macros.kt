@@ -56,6 +56,11 @@ object Macros {
         Specs.GLITCH_PITCH to 0.4f, Specs.GLITCH_DROP to 0.3f, Specs.GLITCH_STATIC to 0.3f,
     )
 
+    val MOVEMENT = blend(
+        "movement", "Movement", "Chorus, phaser, tremolo and tape warble together.",
+        Specs.CHORUS to 1f, Specs.PHASER to 0.6f, Specs.TREMOLO to 0.3f, Specs.WARBLE to 0.5f,
+    )
+
     private const val WIDE_LOW = 70f
     private const val WIDE_HIGH = 18000f
     private const val NARROW_LOW = 500f
@@ -72,5 +77,5 @@ object Macros {
 
     val ROOM = blend("room", "Room", "Reverb and echo together.", Specs.REVERB_MIX to 1f, Specs.ECHO_MIX to 0.3f)
 
-    val all: List<Macro> = listOf(AUTOTUNE, ROBOTIC, GLITCHES, TONE, ROOM)
+    val all: List<Macro> = listOf(AUTOTUNE, ROBOTIC, GLITCHES, MOVEMENT, TONE, ROOM)
 }

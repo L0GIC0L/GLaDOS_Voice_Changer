@@ -95,6 +95,9 @@ private fun SimpleCard(vm: MainViewModel, params: com.l0gic0l.glados.model.Voice
             ParamControl(Specs.DENOISE, params, vm::setParam)
             ParamControl(Specs.SHIFT, params, vm::setParam)
             ParamControl(Specs.FORMANT, params, vm::setParam)
+            ParamControl(Specs.TEMPO, params, vm::setParam)
+            ParamControl(Specs.SPEED_RANDOM, params, vm::setParam)
+            ParamControl(Specs.HARMONY_MIX, params, vm::setParam)
             for (m in Macros.all) MacroControl(m, params, onChange = { vm.setMacro(m, it) })
             ParamControl(Specs.OUT_DB, params, vm::setParam)
         }

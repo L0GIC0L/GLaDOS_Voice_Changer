@@ -168,7 +168,8 @@ class FxChainTest {
         val x = FloatArray(sr * 10) { (0.3 * kotlin.math.sin(2 * Math.PI * 200.0 * it / sr)).toFloat() * (1f + 0.5f * kotlin.math.sin(it * 0.0005f)) }
         val base = Presets.all.first { it.name == "Natural" }.apply()
         val clean = process(x, base)
-        for (spec in listOf(Specs.GLITCH, Specs.GLITCH_REVERSE, Specs.GLITCH_TAPE, Specs.GLITCH_PITCH, Specs.GLITCH_DROP, Specs.GLITCH_STATIC, Specs.BUZZ, Specs.RASP)) {
+        for (spec in listOf(Specs.GLITCH, Specs.GLITCH_REVERSE, Specs.GLITCH_TAPE, Specs.GLITCH_PITCH, Specs.GLITCH_DROP, Specs.GLITCH_STATIC, Specs.BUZZ, Specs.RASP,
+            Specs.CHORUS, Specs.PHASER, Specs.TREMOLO, Specs.WARBLE)) {
             val p = base.with(spec, 100f)
             val y = process(x, p)
             var changedBlocks = 0
@@ -185,6 +186,17 @@ class FxChainTest {
             val quiet = process(FloatArray(sr * 2), p)
             assertTrue("${spec.id} made sound out of silence", quiet.all { it == 0f })
         }
+    }
+
+    @Test
+    fun crackleAddsClicksEvenInSilence() {
+        val p = Presets.all.first { it.name == "Natural" }.apply().with(Specs.CRACKLE, 100f)
+        val y = process(FloatArray(sr * 2), p)
+        var clicks = 0
+        for (i in 1 until y.size) if (abs(y[i]) > 0.02f && abs(y[i - 1]) <= 0.02f) clicks++
+        println("crackle: $clicks clicks in 2 s")
+        assertTrue("crackle clicks $clicks", clicks in 20..200)
+        assertFiniteAndBounded(y, "crackle")
     }
 
     @Test

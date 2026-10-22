@@ -243,6 +243,66 @@ class OfflineTest {
     }
 
     @Test
+    fun doubleSpeedHalvesTheLengthButKeepsThePitch() {
+        val (x, spans) = phrase()
+        val an = analyse(x)
+        val warp = SpeedWarp.build(x.size, sr, tempo = 2.0, random = 0.0)
+        val y = OfflineRenderer.render(x, an, NoteOps.segment(an), RenderSettings(warp = warp))
+        assertEquals(x.size / 2.0, y.size.toDouble(), x.size * 0.01)
+        for ((a, b) in spans) {
+            val mid = (a + b) / 2 * sr
+            val ra = warp.toRendered(mid - 0.1 * sr) / sr
+            val rb = warp.toRendered(mid + 0.1 * sr) / sr
+            assertEquals(0.0, TestSignals.cents(medianHz(y, ra, rb), medianHz(x, mid / sr - 0.1, mid / sr + 0.1)), 15.0)
+        }
+    }
+
+    @Test
+    fun randomSpeedIsRepeatableAndMapsBothWays() {
+        val n = sr * 6
+        val a = SpeedWarp.build(n, sr, tempo = 1.0, random = 0.8)
+        val b = SpeedWarp.build(n, sr, tempo = 1.0, random = 0.8)
+        assertEquals(a.renderedLength, b.renderedLength)
+        assertTrue("random speed should change the length", abs(a.renderedLength - n) > sr * 0.05)
+        var prev = -1.0
+        var fastest = 0.0
+        var slowest = Double.MAX_VALUE
+        var u = 0.0
+        while (u < n) {
+            val s = a.toRendered(u)
+            assertTrue("warp must move forward", s > prev)
+            assertEquals(u, a.toTimeline(s), 1e-6)
+            assertEquals(s, b.toRendered(u), 0.0)
+            if (prev >= 0) {
+                val speed = (sr * 0.01) / (s - prev)
+                fastest = maxOf(fastest, speed)
+                slowest = minOf(slowest, speed)
+            }
+            prev = s
+            u += sr * 0.01
+        }
+        println("random speed: ${"%.2f".format(slowest)}x to ${"%.2f".format(fastest)}x, length ${a.renderedLength} for $n")
+        assertTrue("never sped up: $fastest", fastest > 1.15)
+        assertTrue("never slowed down: $slowest", slowest < 0.87)
+        assertTrue(SpeedWarp.build(n, sr, 1.0, 0.0).isIdentity)
+    }
+
+    @Test
+    fun anOctaveDownHarmonyAddsTheLowerVoice() {
+        val (x, spans) = phrase()
+        val an = analyse(x)
+        val edit = NoteOps.segment(an)
+        val y = OfflineRenderer.render(x, an, edit, RenderSettings(harmonyMix = 1f, harmonySt = -12.0))
+        val main = OfflineRenderer.render(x, an, edit, RenderSettings())
+        val low = OfflineRenderer.render(x, an, edit, RenderSettings(pitchShift = -12.0))
+        val (a, b) = spans[0]
+        assertEquals(-1200.0, TestSignals.cents(medianHz(low, a + 0.08, b - 0.08), medianHz(x, a + 0.08, b - 0.08)), 15.0)
+        // The result is the voice plus the octave-down copy, levelled so the pair is not much louder than one voice.
+        for (i in y.indices) assertEquals((main[i] + low[i]) / 1.5f, y[i], 1e-5f)
+        for (v in y) assertFalse(v.isNaN() || abs(v) > 1.5f)
+    }
+
+    @Test
     fun globalShiftHelperMatchesRegister() {
         val (x, _) = phrase()
         val an = analyse(x)

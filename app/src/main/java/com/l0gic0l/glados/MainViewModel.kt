@@ -19,6 +19,7 @@ import com.l0gic0l.glados.dsp.FxChain
 import com.l0gic0l.glados.dsp.NoteOps
 import com.l0gic0l.glados.dsp.OfflineRenderer
 import com.l0gic0l.glados.dsp.RenderSettings
+import com.l0gic0l.glados.dsp.SpeedWarp
 import com.l0gic0l.glados.dsp.Wav
 import com.l0gic0l.glados.model.Presets
 import com.l0gic0l.glados.model.Specs
@@ -51,6 +52,7 @@ private class Cleaned(val audio: Audio, val amount: Float, val samples: FloatArr
 private data class RenderKey(
     val shift: Float, val formant: Float, val follow: Float, val autoReg: Boolean, val regHz: Float, val breath: Float, val a4: Float,
     val vibDepth: Float, val vibRate: Float, val dry: Float, val denoise: Float,
+    val tempo: Float, val speedRandom: Float, val harmonyMix: Float, val harmonySt: Float,
 )
 
 /** Settings that decide where each note is pulled to. */
@@ -107,6 +109,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var loadJob: Job? = null
     private var dry: FloatArray? = null
 
+    /** How the clip being played maps onto the editor's timeline (speed changes make them differ). */
+    @Volatile private var warp: SpeedWarp? = null
+
     @Volatile private var cleaned: Cleaned? = null
 
     init {
@@ -117,6 +122,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     it[Specs.SHIFT], it[Specs.FORMANT], it[Specs.FORMANT_FOLLOW], it.bool(Specs.AUTO_REG),
                     it[Specs.REG_HZ], it[Specs.BREATH], it[Specs.REF_A4],
                     it[Specs.VIB_DEPTH], it[Specs.VIB_RATE], it[Specs.DRY], it[Specs.DENOISE],
+                    it[Specs.TEMPO], it[Specs.SPEED_RANDOM], it[Specs.HARMONY_MIX], it[Specs.HARMONY_ST],
                 )
             }.distinctUntilChanged().drop(1).collect { scheduleRender(80) }
         }
@@ -376,8 +382,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 canUndo = false
                 canRedo = false
                 editVersion++
-                dry = out
-                player.setClip(out, audio.sampleRate)
+                warp = null // a new clip: nothing to carry the playhead over from
+                publish(out)
                 if (autoplay) player.play(fromStart = true)
             } catch (ex: CancellationException) {
                 throw ex
@@ -392,14 +398,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         job.start()
     }
 
-    private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, noisy: Boolean, cancelled: () -> Boolean): FloatArray {
+    private class Rendered(val samples: FloatArray, val warp: SpeedWarp, val sampleRate: Int)
+
+    private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, noisy: Boolean, cancelled: () -> Boolean): Rendered {
         val source = if (noisy) clean(audio, p[Specs.DENOISE], cancelled) else audio.samples
         val shift = NoteOps.globalShift(an, p)
+        val warp = SpeedWarp.build(
+            audio.samples.size, audio.sampleRate, p[Specs.TEMPO] / 100.0, p[Specs.SPEED_RANDOM] / 100.0,
+        )
         val settings = RenderSettings(
             shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f,
             p[Specs.VIB_DEPTH].toDouble(), p[Specs.VIB_RATE].toDouble(), p[Specs.DRY] / 100f,
+            p[Specs.HARMONY_MIX] / 100f, p[Specs.HARMONY_ST].toDouble(), warp,
         )
-        return OfflineRenderer.render(source, an, e, settings, cancelled)
+        return Rendered(OfflineRenderer.render(source, an, e, settings, cancelled), warp, audio.sampleRate)
+    }
+
+    /** Hands a render to the player, keeping the playhead on the same spot of the timeline if the speed changed. */
+    private fun publish(r: Rendered) {
+        val old = warp
+        val timeline = old?.toTimeline(player.positionSeconds.toDouble() * r.sampleRate)
+        dry = r.samples
+        warp = r.warp
+        player.setClip(r.samples, r.sampleRate)
+        if (old != null && timeline != null && old !== r.warp && !(old.isIdentity && r.warp.isIdentity)) {
+            player.seek((r.warp.toRendered(timeline) / r.sampleRate).toFloat())
+        }
+    }
+
+    /** Playhead position on the editor's timeline, in seconds. */
+    val playheadSeconds: Float
+        get() {
+            val sr = clip?.audio?.sampleRate ?: return player.positionSeconds
+            val w = warp ?: return player.positionSeconds
+            return (w.toTimeline(player.positionSeconds.toDouble() * sr) / sr).toFloat()
+        }
+
+    /** Moves the playhead to [seconds] on the editor's timeline. */
+    fun seekTimeline(seconds: Float) {
+        val sr = clip?.audio?.sampleRate
+        val w = warp
+        if (sr == null || w == null) player.seek(seconds) else player.seek((w.toRendered(seconds.toDouble() * sr) / sr).toFloat())
     }
 
     /** Noise-reduced samples, computed once per clip and setting. Pitch analysis keeps using the original audio. */
@@ -419,10 +458,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             delay(delayMs)
             val out = renderClip(cs.audio, cs.analysis, ed, p, cs.noisy) { !isActive }
             // Only publish if this render is still for the clip on screen.
-            if (isActive && clip === cs) {
-                dry = out
-                player.setClip(out, cs.audio.sampleRate)
-            }
+            if (isActive && clip === cs) publish(out)
         }
     }
 

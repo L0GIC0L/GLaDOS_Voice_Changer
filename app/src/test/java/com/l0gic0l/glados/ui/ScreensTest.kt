@@ -310,6 +310,17 @@ class ScreensTest {
     }
 
     @Test
+    fun thePlayheadFollowsTheTimelineWhenTheSpeedChanges() {
+        loadClip()
+        val before = vm.player.durationSeconds
+        vm.setParam(Specs.TEMPO, 200f)
+        rule.waitUntil(timeoutMillis = 30_000) { vm.player.durationSeconds < before * 0.6f }
+        vm.seekTimeline(1.0f)
+        assertEquals(1.0f, vm.playheadSeconds, 0.01f)
+        assertEquals("the clip plays twice as fast", 0.5f, vm.player.positionSeconds, 0.02f)
+    }
+
+    @Test
     fun lightThemeRenders() {
         loadClip()
         showApp(dark = false)

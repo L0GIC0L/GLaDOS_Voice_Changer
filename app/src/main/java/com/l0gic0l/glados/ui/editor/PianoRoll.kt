@@ -143,8 +143,8 @@ fun PianoRoll(vm: MainViewModel, controls: RollControls, modifier: Modifier = Mo
         while (playing) {
             androidx.compose.runtime.withFrameNanos { }
             val v = view ?: continue
-            val x = gutter + (vm.player.positionSeconds - v.scrollSec) * v.pxPerSec
-            if (x > boxSize.width - 24 || x < gutter) view = v.copy(scrollSec = max(0f, vm.player.positionSeconds - 0.5f))
+            val x = gutter + (vm.playheadSeconds - v.scrollSec) * v.pxPerSec
+            if (x > boxSize.width - 24 || x < gutter) view = v.copy(scrollSec = max(0f, vm.playheadSeconds - 0.5f))
         }
     }
 
@@ -175,7 +175,7 @@ fun PianoRoll(vm: MainViewModel, controls: RollControls, modifier: Modifier = Mo
                         hitBox != null -> Drag.PITCH
                         else -> Drag.PAN
                     }
-                    if (mode == Drag.SEEK) vm.player.seek(max(0.0, geo0.sec(down.position.x)).toFloat())
+                    if (mode == Drag.SEEK) vm.seekTimeline(max(0.0, geo0.sec(down.position.x)).toFloat())
 
                     var started = false
                     var moved = false
@@ -215,7 +215,7 @@ fun PianoRoll(vm: MainViewModel, controls: RollControls, modifier: Modifier = Mo
                         if (!moved) continue
 
                         when (mode) {
-                            Drag.SEEK -> vm.player.seek(max(0.0, geo0.sec(change.position.x)).toFloat())
+                            Drag.SEEK -> vm.seekTimeline(max(0.0, geo0.sec(change.position.x)).toFloat())
                             Drag.PAN -> {
                                 val v = viewState.value ?: break
                                 view = v.copy(
@@ -372,7 +372,7 @@ fun PianoRoll(vm: MainViewModel, controls: RollControls, modifier: Modifier = Mo
             }
 
             // Playhead.
-            val px = geo.x(vm.player.positionSeconds.toDouble())
+            val px = geo.x(vm.playheadSeconds.toDouble())
             if (px in gutter..w) drawLine(colors.error, Offset(px, ruler), Offset(px, h), 2f * dp1)
         }
 
