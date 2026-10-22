@@ -112,6 +112,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** How the clip being played maps onto the editor's timeline (speed changes make them differ). */
     @Volatile private var warp: SpeedWarp? = null
 
+    /** The last speed map built and what it was built for, so re-renders reuse the very same map. */
+    @Volatile private var warpCache: Pair<List<Number>, SpeedWarp>? = null
+
     @Volatile private var cleaned: Cleaned? = null
 
     init {
@@ -403,15 +406,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun renderClip(audio: Audio, an: Analysis, e: Edit, p: VoiceParams, noisy: Boolean, cancelled: () -> Boolean): Rendered {
         val source = if (noisy) clean(audio, p[Specs.DENOISE], cancelled) else audio.samples
         val shift = NoteOps.globalShift(an, p)
-        val warp = SpeedWarp.build(
-            audio.samples.size, audio.sampleRate, p[Specs.TEMPO] / 100.0, p[Specs.SPEED_RANDOM] / 100.0,
-        )
+        val warp = speedWarp(audio, p)
         val settings = RenderSettings(
             shift, NoteOps.formantShift(p, shift), p[Specs.BREATH] / 100f,
             p[Specs.VIB_DEPTH].toDouble(), p[Specs.VIB_RATE].toDouble(), p[Specs.DRY] / 100f,
             p[Specs.HARMONY_MIX] / 100f, p[Specs.HARMONY_ST].toDouble(), warp,
         )
         return Rendered(OfflineRenderer.render(source, an, e, settings, cancelled), warp, audio.sampleRate)
+    }
+
+    /**
+     * The speed map for [audio] at the current Speed settings. The same settings give back the same instance, so a
+     * re-render after a note edit does not look like a speed change to [publish] (which would seek and reset the effects).
+     */
+    private fun speedWarp(audio: Audio, p: VoiceParams): SpeedWarp {
+        val key = listOf(audio.samples.size, audio.sampleRate, p[Specs.TEMPO], p[Specs.SPEED_RANDOM])
+        warpCache?.let { if (it.first == key) return it.second }
+        return SpeedWarp.build(audio.samples.size, audio.sampleRate, p[Specs.TEMPO] / 100.0, p[Specs.SPEED_RANDOM] / 100.0)
+            .also { warpCache = key to it }
     }
 
     /** Hands a render to the player, keeping the playhead on the same spot of the timeline if the speed changed. */
