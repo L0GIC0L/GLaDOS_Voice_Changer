@@ -33,3 +33,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Scratch working copies made by Claude Code agents
+.claude/worktrees/
